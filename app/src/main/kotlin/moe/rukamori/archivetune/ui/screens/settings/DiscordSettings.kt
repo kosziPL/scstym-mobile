@@ -321,7 +321,7 @@ fun DiscordSettings(navController: NavController) {
     val (button2Label) =
         rememberPreference(
             key = DiscordActivityButton2LabelKey,
-            defaultValue = "Go to ArchiveTune",
+            defaultValue = "Go to SCSTYM",
         )
     val (button2Enabled) =
         rememberPreference(
@@ -1228,7 +1228,7 @@ fun RichPresence(
     button1Enabled: Boolean = true,
     button1UrlSource: String = "songurl",
     button1CustomUrl: String = "",
-    button2Label: String = "Go to ArchiveTune",
+    button2Label: String = "Go to SCSTYM",
     button2Enabled: Boolean = true,
     button2UrlSource: String = "custom",
     button2CustomUrl: String = "https://github.com/rukamori/ArchiveTune",

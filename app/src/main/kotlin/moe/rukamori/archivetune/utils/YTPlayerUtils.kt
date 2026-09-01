@@ -40,9 +40,12 @@ import moe.rukamori.archivetune.innertube.models.response.PlayerResponse
 import moe.rukamori.archivetune.utils.potoken.BotGuardTokenGenerator
 import moe.rukamori.archivetune.utils.potoken.PoTokenResult
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import timber.log.Timber
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.TimeUnit
 
 object YTPlayerUtils {
     private const val logTag = "YTPlayerUtils"
@@ -52,6 +55,34 @@ object YTPlayerUtils {
     private const val PLAYBACK_DATA_RESOLUTION_MUTEX_COUNT = 32
     const val STREAM_URL_EXPIRY_SAFETY_MS = 60_000L
     private val RETRYABLE_STREAM_RESPONSE_CODES = setOf(403, 404, 410, 416)
+
+    internal fun isRejectedStreamProbeStatus(statusCode: Int): Boolean =
+        statusCode in RETRYABLE_STREAM_RESPONSE_CODES
+
+    private fun probeStreamUrl(url: String): Int? =
+        runCatching {
+            val profile = StreamClientUtils.resolveRequestProfile(url)
+            val requestBuilder =
+                Request
+                    .Builder()
+                    .url(url)
+                    .header("Range", "bytes=0-1")
+                    .header("Accept-Encoding", "identity")
+            val request = StreamClientUtils.applyRequestProfile(requestBuilder, profile).build()
+            OkHttpClient
+                .Builder()
+                .proxy(YouTube.streamOkHttpProxy)
+                .connectTimeout(5, TimeUnit.SECONDS)
+                .readTimeout(5, TimeUnit.SECONDS)
+                .followRedirects(true)
+                .followSslRedirects(true)
+                .build()
+                .newCall(request)
+                .execute()
+                .use { it.code }
+        }.onFailure {
+            Timber.tag(logTag).d(it, "Stream URL probe could not complete; deferring validation to Media3")
+        }.getOrNull()
 
     private fun extractExpireTimestampMsFromUrl(url: String): Long? {
         val expireTimestamp =
@@ -1134,6 +1165,22 @@ object YTPlayerUtils {
                     continue
                 }
                 val candidateUrl = candidateResult.getOrThrow()
+                val probeStatus = probeStreamUrl(candidateUrl)
+                if (probeStatus != null && isRejectedStreamProbeStatus(probeStatus)) {
+                    streamUrlCache.remove(cacheKey)
+                    markStreamClientFailed(
+                        videoId = videoId,
+                        clientKey = StreamClientUtils.buildClientKey(client),
+                        httpStatusCode = probeStatus,
+                        authFingerprint = authState.fingerprint,
+                    )
+                    Timber.tag(logTag).w(
+                        "Rejected stream URL from %s after HTTP probe returned %d",
+                        describeClient(client),
+                        probeStatus,
+                    )
+                    break
+                }
                 selectedFormat = candidate
                 selectedUrl = candidateUrl
                 break

@@ -12,6 +12,11 @@ pluginManagement {
         mavenCentral()
         gradlePluginPortal()
     }
+    plugins {
+    }
+}
+plugins {
+    id("org.gradle.toolchains.foojay-resolver-convention") version "1.0.0"
 }
 
 dependencyResolutionManagement {
@@ -44,7 +49,7 @@ dependencyResolutionManagement {
 //     id("org.gradle.toolchains.foojay-resolver-convention") version("1.0.0")
 // }
 
-rootProject.name = "ArchiveTune"
+rootProject.name = "SCSTYM"
 include(":app")
 include(":core")
 include(":lyrics:kugou")

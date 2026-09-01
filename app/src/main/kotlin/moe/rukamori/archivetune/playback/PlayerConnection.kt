@@ -389,13 +389,18 @@ class PlayerConnection(
     }
 
     override fun onPlayerErrorChanged(playbackError: PlaybackException?) {
-        if (playbackError != null) {
+        if (playbackError != null && !service.shouldSuppressPlaybackError(playbackError)) {
             reportException(playbackError)
         }
         updatePlaybackError(playbackError)
     }
 
     private fun updatePlaybackError(playbackError: PlaybackException?) {
+        if (playbackError != null && service.shouldSuppressPlaybackError(playbackError)) {
+            dismissedPlaybackError = playbackError
+            error.value = null
+            return
+        }
         when {
             playbackError == null -> {
                 dismissedPlaybackError = null

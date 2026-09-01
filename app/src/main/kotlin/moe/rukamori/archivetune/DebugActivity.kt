@@ -428,7 +428,7 @@ private fun buildCrashReport(
 
     val header =
         buildString {
-            appendLine("ArchiveTune crash report")
+            appendLine("SCSTYM crash report")
             if (timestampText.isNotBlank()) appendLine("Time: $timestampText")
             val appVersionLabel =
                 when {

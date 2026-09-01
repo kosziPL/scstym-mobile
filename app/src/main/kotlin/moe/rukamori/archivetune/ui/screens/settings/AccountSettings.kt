@@ -188,19 +188,46 @@ fun AccountSettings(
     val accountImageUrl by viewModel.accountImageUrl.collectAsStateWithLifecycle()
     val accountChannelsState by viewModel.accountChannelsState.collectAsStateWithLifecycle()
 
-    val displayName =
-        when {
-            accountNameFromViewModel.isNotBlank() -> accountNameFromViewModel
-            accountNamePref.isNotBlank() -> accountNamePref
-            isLoggedIn -> accountLabel
-            else -> loginLabel
+    // Keep the last successful channel list while the ViewModel briefly moves through
+    // loading states during an account/channel switch. This prevents the entire channel
+    // section from disappearing and then popping back into the sheet.
+    var stableAccountChannels by remember { mutableStateOf<List<AccountChannelUiModel>>(emptyList()) }
+    LaunchedEffect(accountChannelsState, isLoggedIn) {
+        if (!isLoggedIn) {
+            stableAccountChannels = emptyList()
+        } else {
+            (accountChannelsState as? AccountChannelsState.Success)?.let { success ->
+                stableAccountChannels = success.channels.items
+            }
         }
-    val hasSwitchableChannels =
-        (accountChannelsState as? AccountChannelsState.Success)
-            ?.channels
-            ?.items
-            ?.size
-            .let { (it ?: 0) > 1 }
+    }
+
+    val activeChannel =
+        stableAccountChannels.firstOrNull {
+            dataSyncId.isNotBlank() && it.dataSyncId == dataSyncId
+        } ?: stableAccountChannels.firstOrNull { it.isSelected }
+
+    // Prefer the channel selected by DataSyncId over stale HomeViewModel profile data.
+    // The old UI could keep showing the previous channel until a full app restart.
+    val displayName =
+        activeChannel?.name?.takeIf { it.isNotBlank() }
+            ?: accountNameFromViewModel.takeIf { it.isNotBlank() }
+            ?: accountNamePref.takeIf { it.isNotBlank() }
+            ?: if (isLoggedIn) accountLabel else loginLabel
+    val displayHandle =
+        activeChannel?.channelHandle?.takeIf { it.isNotBlank() }
+            ?: accountChannelHandle
+    val displayImageUrl =
+        activeChannel?.thumbnailUrl?.takeIf { it.isNotBlank() }
+            ?: accountImageUrl
+
+    val hasSwitchableChannels = stableAccountChannels.size > 1
+    val isCurrentAccountSaved =
+        isLoggedIn &&
+                savedAccounts.accounts.any { account ->
+                    account.innerTubeCookie == innerTubeCookie &&
+                            account.dataSyncId == dataSyncId
+                }
 
     var showToken by remember { mutableStateOf(false) }
     var showTokenEditor by remember { mutableStateOf(false) }
@@ -210,35 +237,51 @@ fun AccountSettings(
     LaunchedEffect(isLoggedIn) {
         if (!isLoggedIn) {
             showToken = false
+            showAccountSwitcher = false
         }
     }
 
     val hasUpdate =
         BuildConfig.UPDATER_AVAILABLE &&
-            Updater.isUpdateAvailable(latestVersionName, BuildConfig.VERSION_NAME)
+                Updater.isUpdateAvailable(latestVersionName, BuildConfig.VERSION_NAME)
     val tokenActionTitle =
         when {
             !isLoggedIn -> stringResource(R.string.advanced_login)
             showToken -> stringResource(R.string.token_shown)
             else -> stringResource(R.string.token_hidden)
         }
+    val tokenActionSubtitle =
+        if (isLoggedIn && showToken) {
+            val secureValue = YouTube.poToken.orEmpty().ifBlank { innerTubeCookie }
+            previewSecureValue(secureValue)
+        } else {
+            tokenDescription
+        }
 
     val saveCurrentAccount: () -> Unit = {
-        val existing = decodeSavedAccounts(savedAccountsJson)
-        if (isLoggedIn && existing.none { it.innerTubeCookie == innerTubeCookie }) {
-            val newAccount =
-                SavedAccount(
-                    id = UUID.randomUUID().toString(),
-                    name = if (accountNameFromViewModel.isNotBlank()) accountNameFromViewModel else accountNamePref,
-                    email = accountEmail,
-                    channelHandle = accountChannelHandle,
-                    innerTubeCookie = innerTubeCookie,
-                    visitorData = visitorData,
-                    dataSyncId = dataSyncId,
-                    ytmSync = ytmSync,
-                    selectedYtmPlaylists = selectedYtmPlaylists,
-                )
-            onSavedAccountsJsonChange(encodeSavedAccounts(existing + newAccount))
+        if (isLoggedIn) {
+            val existing = decodeSavedAccounts(savedAccountsJson)
+            val alreadySaved =
+                existing.any { account ->
+                    account.innerTubeCookie == innerTubeCookie &&
+                            account.dataSyncId == dataSyncId
+                }
+
+            if (!alreadySaved) {
+                val newAccount =
+                    SavedAccount(
+                        id = UUID.randomUUID().toString(),
+                        name = displayName,
+                        email = accountEmail,
+                        channelHandle = displayHandle,
+                        innerTubeCookie = innerTubeCookie,
+                        visitorData = visitorData,
+                        dataSyncId = dataSyncId,
+                        ytmSync = ytmSync,
+                        selectedYtmPlaylists = selectedYtmPlaylists,
+                    )
+                onSavedAccountsJsonChange(encodeSavedAccounts(existing + newAccount))
+            }
         }
     }
 
@@ -261,6 +304,14 @@ fun AccountSettings(
         onSavedAccountsJsonChange(encodeSavedAccounts(existing.filter { it.id != account.id }))
     }
 
+    val logOut: () -> Unit = {
+        showToken = false
+        showAccountSwitcher = false
+        onInnerTubeCookieChange("")
+        forgetAccount(context, clearWebAuthSession = false)
+        viewModel.onAction(moe.rukamori.archivetune.home.HomeAction.Refresh)
+    }
+
     Scaffold(
         modifier =
             Modifier
@@ -271,14 +322,12 @@ fun AccountSettings(
         topBar = {
             LargeFlexibleTopAppBar(
                 title = {
-                    Column {
-                        Text(
-                            text = accountLabel,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
+                    Text(
+                        text = accountLabel,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                 },
                 navigationIcon = {
                     IconButton(
@@ -332,8 +381,8 @@ fun AccountSettings(
                         isLoggedIn = isLoggedIn,
                         accountName = displayName,
                         accountEmail = accountEmail,
-                        accountHandle = accountChannelHandle,
-                        accountImageUrl = accountImageUrl,
+                        accountHandle = displayHandle,
+                        accountImageUrl = displayImageUrl,
                         accountSwitcherEnabled =
                             isLoggedIn || savedAccounts.accounts.isNotEmpty() || hasSwitchableChannels,
                         onPrimaryAction = {
@@ -345,9 +394,7 @@ fun AccountSettings(
                         },
                         onSecondaryAction = {
                             if (isLoggedIn) {
-                                showToken = false
-                                onInnerTubeCookieChange("")
-                                forgetAccount(context, clearWebAuthSession = true)
+                                logOut()
                             } else {
                                 showTokenEditor = true
                             }
@@ -365,16 +412,8 @@ fun AccountSettings(
                     }
                 }
 
-                item {
-                    AnimatedVisibility(
-                        visible = isLoggedIn,
-                        enter =
-                            fadeIn(spring(stiffness = Spring.StiffnessLow)) +
-                                expandVertically(
-                                    spring(stiffness = Spring.StiffnessLow),
-                                ),
-                        exit = fadeOut() + shrinkVertically(),
-                    ) {
+                if (isLoggedIn) {
+                    item {
                         ExpressiveSectionCard(title = generalLabel) {
                             ExpressiveSwitchRow(
                                 icon = painterResource(R.drawable.add_circle),
@@ -443,15 +482,13 @@ fun AccountSettings(
                         ExpressiveActionRow(
                             icon = painterResource(R.drawable.token),
                             title = tokenActionTitle,
-                            subtitle = tokenDescription,
+                            subtitle = tokenActionSubtitle,
                             accent = if (isLoggedIn && showToken) MaterialTheme.colorScheme.tertiary else null,
                             onClick = {
-                                if (!isLoggedIn) {
-                                    showTokenEditor = true
-                                } else if (!showToken) {
-                                    showToken = true
-                                } else {
-                                    showTokenEditor = true
+                                when {
+                                    !isLoggedIn -> showTokenEditor = true
+                                    !showToken -> showToken = true
+                                    else -> showTokenEditor = true
                                 }
                             },
                             index = 1,
@@ -471,22 +508,28 @@ fun AccountSettings(
         AccountSwitcherSheet(
             isLoggedIn = isLoggedIn,
             savedAccounts = savedAccounts,
+            isCurrentAccountSaved = isCurrentAccountSaved,
             activeInnerTubeCookie = innerTubeCookie,
             activeDataSyncId = dataSyncId,
-            accountChannelsState = accountChannelsState,
+            accountChannels = stableAccountChannels,
             onSaveAccount = saveCurrentAccount,
             onSwitchAccount = switchToAccount,
             onSwitchAccountChannel = switchToAccountChannel,
             onRemoveAccount = removeAccount,
             onAddAnotherAccount = {
                 showAccountSwitcher = false
-                val isSaved = savedAccounts.accounts.any { it.innerTubeCookie == innerTubeCookie }
+                val isSaved =
+                    savedAccounts.accounts.any { account ->
+                        account.innerTubeCookie == innerTubeCookie &&
+                                account.dataSyncId == dataSyncId
+                    }
                 if (isLoggedIn && !isSaved) {
                     showUnsavedAccountDialog = true
                 } else {
                     navController.navigate(buildLoginRoute())
                 }
             },
+            onLogOut = logOut,
             onDismiss = { showAccountSwitcher = false },
         )
     }
@@ -736,23 +779,22 @@ private fun AccountSummaryCard(
 private fun AccountSwitcherSheet(
     isLoggedIn: Boolean,
     savedAccounts: SavedAccountCollection,
+    isCurrentAccountSaved: Boolean,
     activeInnerTubeCookie: String,
     activeDataSyncId: String,
-    accountChannelsState: AccountChannelsState,
+    accountChannels: List<AccountChannelUiModel>,
     onSaveAccount: () -> Unit,
     onSwitchAccount: (SavedAccount) -> Unit,
     onSwitchAccountChannel: (AccountChannelUiModel) -> Unit,
     onRemoveAccount: (SavedAccount) -> Unit,
     onAddAnotherAccount: () -> Unit,
+    onLogOut: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    val accountChannels =
-        (accountChannelsState as? AccountChannelsState.Success)
-            ?.channels
-            ?.items
-            .orEmpty()
-            .takeIf { it.size > 1 }
-            .orEmpty()
+    val switchableChannels = accountChannels.takeIf { it.size > 1 }.orEmpty()
+    val resolvedActiveDataSyncId =
+        activeDataSyncId.takeIf { it.isNotBlank() }
+            ?: switchableChannels.firstOrNull { it.isSelected }?.dataSyncId
 
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Text(
@@ -770,24 +812,34 @@ private fun AccountSwitcherSheet(
             contentPadding = PaddingValues(start = 16.dp, top = 8.dp, end = 16.dp, bottom = 32.dp),
             verticalArrangement = Arrangement.spacedBy(ListItemDefaults.SegmentedGap),
         ) {
-            if (accountChannels.isNotEmpty()) {
+            if (switchableChannels.isNotEmpty()) {
                 item(key = "channel_header", contentType = "header") {
                     AccountSheetSectionLabel(text = stringResource(R.string.youtube_channels))
                 }
+
                 itemsIndexed(
-                    items = accountChannels,
+                    items = switchableChannels,
                     key = { index, channel -> "${channel.dataSyncId}:${channel.name}:$index" },
                     contentType = { _, _ -> "channel" },
                 ) { index, channel ->
-                    val isActive = channel.isSelected || channel.dataSyncId == activeDataSyncId
+                    // DataSyncId is the single source of truth when available. Falling back
+                    // to isSelected only when no DataSyncId exists avoids two checkmarks.
+                    val isActive =
+                        if (!resolvedActiveDataSyncId.isNullOrBlank()) {
+                            channel.dataSyncId == resolvedActiveDataSyncId
+                        } else {
+                            channel.isSelected
+                        }
+
                     SegmentedListItem(
                         selected = isActive,
                         onClick = {
-                            if (!isActive) onSwitchAccountChannel(channel)
-                            onDismiss()
+                            if (!isActive) {
+                                onSwitchAccountChannel(channel)
+                            }
                         },
                         modifier = Modifier.fillMaxWidth(),
-                        shapes = ListItemDefaults.segmentedShapes(index = index, count = accountChannels.size),
+                        shapes = ListItemDefaults.segmentedShapes(index = index, count = switchableChannels.size),
                         colors =
                             ListItemDefaults.segmentedColors(
                                 containerColor = MaterialTheme.colorScheme.surfaceContainer,
@@ -859,12 +911,23 @@ private fun AccountSwitcherSheet(
                     key = { _, account -> account.id },
                     contentType = { _, _ -> "saved_account" },
                 ) { index, account ->
-                    val isActive = account.innerTubeCookie == activeInnerTubeCookie
+                    // A cookie identifies the Google session, not necessarily the active
+                    // YouTube channel. Include DataSyncId so multiple channels under one
+                    // Google account do not all render as selected.
+                    val isActive =
+                        account.innerTubeCookie == activeInnerTubeCookie &&
+                                if (activeDataSyncId.isNotBlank()) {
+                                    account.dataSyncId == activeDataSyncId
+                                } else {
+                                    account.dataSyncId.isBlank()
+                                }
+
                     SegmentedListItem(
                         selected = isActive,
                         onClick = {
-                            if (!isActive) onSwitchAccount(account)
-                            onDismiss()
+                            if (!isActive) {
+                                onSwitchAccount(account)
+                            }
                         },
                         modifier = Modifier.fillMaxWidth(),
                         shapes =
@@ -908,9 +971,13 @@ private fun AccountSwitcherSheet(
                             }
                         },
                         supportingContent = {
-                            if (account.email.isNotBlank()) {
+                            val subtitle =
+                                account.channelHandle.ifBlank {
+                                    account.email
+                                }
+                            if (subtitle.isNotBlank()) {
                                 Text(
-                                    text = account.email,
+                                    text = subtitle,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                 )
@@ -927,20 +994,19 @@ private fun AccountSwitcherSheet(
                 }
             }
 
-            if (isLoggedIn) {
-                item(key = "account_actions", contentType = "actions") {
-                    Column(
-                        modifier =
-                            Modifier
-                                .fillMaxWidth()
-                                .padding(top = 12.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
+            item(key = "account_actions", contentType = "actions") {
+                Column(
+                    modifier =
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(top = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    if (isLoggedIn) {
                         FilledTonalButton(
-                            onClick = {
-                                onSaveAccount()
-                                onDismiss()
-                            },
+                            onClick = onSaveAccount,
+                            enabled = !isCurrentAccountSaved,
+                            modifier = Modifier.fillMaxWidth(),
                             shapes = ButtonDefaults.shapes(),
                         ) {
                             Icon(
@@ -950,16 +1016,32 @@ private fun AccountSwitcherSheet(
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(text = stringResource(R.string.save_current_account))
                         }
-                        OutlinedButton(
-                            onClick = onAddAnotherAccount,
+                    }
+
+                    OutlinedButton(
+                        onClick = onAddAnotherAccount,
+                        modifier = Modifier.fillMaxWidth(),
+                        shapes = ButtonDefaults.shapes(),
+                    ) {
+                        Icon(
+                            painter = painterResource(R.drawable.add_circle),
+                            contentDescription = null,
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(text = stringResource(R.string.add_another_account))
+                    }
+
+                    if (isLoggedIn) {
+                        TextButton(
+                            onClick = onLogOut,
+                            modifier = Modifier.fillMaxWidth(),
+                            colors =
+                                ButtonDefaults.textButtonColors(
+                                    contentColor = MaterialTheme.colorScheme.error,
+                                ),
                             shapes = ButtonDefaults.shapes(),
                         ) {
-                            Icon(
-                                painter = painterResource(R.drawable.add_circle),
-                                contentDescription = null,
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(text = stringResource(R.string.add_another_account))
+                            Text(text = stringResource(R.string.action_logout))
                         }
                     }
                 }
@@ -1286,26 +1368,29 @@ private fun TokenEditorDialog(
         ***ACCOUNT CHANNEL HANDLE*** =$accountChannelHandle
         """.trimIndent()
 
+    fun valueFor(data: String, prefix: String): String =
+        data.lineSequence()
+            .firstOrNull { it.startsWith(prefix) }
+            ?.substringAfter("=")
+            ?.trim()
+            .orEmpty()
+
     TextFieldDialog(
         initialTextFieldValue = TextFieldValue(text),
         onDone = { data ->
-            data.split("\n").forEach {
-                when {
-                    it.startsWith("***INNERTUBE COOKIE*** =") -> onInnerTubeCookieChange(it.substringAfter("="))
-                    it.startsWith("***VISITOR DATA*** =") -> onVisitorDataChange(it.substringAfter("="))
-                    it.startsWith("***DATASYNC ID*** =") -> onDataSyncIdChange(it.substringAfter("="))
-                    it.startsWith("***PO TOKEN*** =") -> onPoTokenChange(it.substringAfter("="))
-                    it.startsWith("***ACCOUNT NAME*** =") -> onAccountNameChange(it.substringAfter("="))
-                    it.startsWith("***ACCOUNT EMAIL*** =") -> onAccountEmailChange(it.substringAfter("="))
-                    it.startsWith("***ACCOUNT CHANNEL HANDLE*** =") -> onAccountChannelHandleChange(it.substringAfter("="))
-                }
-            }
+            onInnerTubeCookieChange(valueFor(data, "***INNERTUBE COOKIE*** ="))
+            onVisitorDataChange(valueFor(data, "***VISITOR DATA*** ="))
+            onDataSyncIdChange(valueFor(data, "***DATASYNC ID*** ="))
+            onPoTokenChange(valueFor(data, "***PO TOKEN*** ="))
+            onAccountNameChange(valueFor(data, "***ACCOUNT NAME*** ="))
+            onAccountEmailChange(valueFor(data, "***ACCOUNT EMAIL*** ="))
+            onAccountChannelHandleChange(valueFor(data, "***ACCOUNT CHANNEL HANDLE*** ="))
         },
         onDismiss = onDismiss,
         singleLine = false,
         maxLines = 20,
-        isInputValid = {
-            hasYouTubeLoginCookie(it)
+        isInputValid = { data ->
+            hasYouTubeLoginCookie(valueFor(data, "***INNERTUBE COOKIE*** ="))
         },
         extraContent = {
             InfoLabel(text = stringResource(R.string.token_adv_login_description))

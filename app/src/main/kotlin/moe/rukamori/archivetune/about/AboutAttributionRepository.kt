@@ -210,7 +210,7 @@ class AboutAttributionRepository
                 client.get(GitHubCommitsUrl) {
                     headers {
                         append("Accept", "application/vnd.github+json")
-                        append("User-Agent", "ArchiveTune")
+                        append("User-Agent", "SCSTYM")
                     }
                     parameter("path", path)
                     parameter("per_page", GitHubCommitsPageSize)
@@ -227,7 +227,7 @@ class AboutAttributionRepository
                 client.get(GitHubTranslationResourceUrl) {
                     headers {
                         append("Accept", "application/vnd.github+json")
-                        append("User-Agent", "ArchiveTune")
+                        append("User-Agent", "SCSTYM")
                     }
                 }
             if (response.status.value !in SuccessStatusCodes) {

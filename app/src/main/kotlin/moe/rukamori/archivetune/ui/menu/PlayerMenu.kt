@@ -51,6 +51,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -95,6 +96,9 @@ import moe.rukamori.archivetune.constants.ExternalDownloaderEnabledKey
 import moe.rukamori.archivetune.constants.ExternalDownloaderPackageKey
 import moe.rukamori.archivetune.constants.PlayerDesignStyle
 import moe.rukamori.archivetune.constants.PlayerDesignStyleKey
+import moe.rukamori.archivetune.constants.PlaybackPitchKey
+import moe.rukamori.archivetune.constants.PlaybackPitchManualKey
+import moe.rukamori.archivetune.constants.PlaybackTempoKey
 import moe.rukamori.archivetune.constants.SpeedDialSongIdsKey
 import moe.rukamori.archivetune.models.MediaMetadata
 import moe.rukamori.archivetune.playback.CanvasArtworkRefetchResult
@@ -1051,24 +1055,28 @@ private fun VolumeSliderL(
 @Composable
 fun TempoPitchDialog(onDismiss: () -> Unit) {
     val playerConnection = LocalPlayerConnection.current ?: return
-    val initialSpeed = remember { playerConnection.player.playbackParameters.speed }
-    val initialPitch = remember { playerConnection.player.playbackParameters.pitch }
+    val (storedTempo, onStoredTempoChange) = rememberPreference(PlaybackTempoKey, 1f)
+    val (storedPitch, onStoredPitchChange) = rememberPreference(PlaybackPitchKey, 1f)
+    val (manualPitch, onManualPitchChange) = rememberPreference(PlaybackPitchManualKey, false)
 
     var tempo by remember {
-        mutableFloatStateOf(initialSpeed.safeCoerceIn(TempoMin, TempoMax, fallback = 1f))
+        mutableFloatStateOf(storedTempo.safeCoerceIn(TempoMin, TempoMax, fallback = 1f))
     }
 
     var pitch by remember {
-        mutableFloatStateOf(initialPitch.safeCoerceIn(PitchMin, PitchMax, fallback = 1f))
+        mutableFloatStateOf(storedPitch.safeCoerceIn(PitchMin, PitchMax, fallback = 1f))
     }
 
-    var pitchMode by rememberSaveable {
-        mutableStateOf(
-            if (isPitchSemitoneAligned(pitch)) PitchMode.Semitones else PitchMode.Multiplier,
-        )
+    LaunchedEffect(storedTempo, storedPitch) {
+        tempo = storedTempo.safeCoerceIn(TempoMin, TempoMax, fallback = 1f)
+        pitch = storedPitch.safeCoerceIn(PitchMin, PitchMax, fallback = 1f)
     }
+
+    val pitchMode = PitchMode.Multiplier
 
     val applyPlaybackParameters: (Float, Float) -> Unit = { speed, pitchMultiplier ->
+        onStoredTempoChange(speed.coerceIn(TempoMin, TempoMax))
+        onStoredPitchChange(pitchMultiplier.coerceIn(PitchMin, PitchMax))
         playerConnection.player.playbackParameters =
             PlaybackParameters(
                 speed.coerceIn(TempoMin, TempoMax),
@@ -1110,6 +1118,43 @@ fun TempoPitchDialog(onDismiss: () -> Unit) {
                         .fillMaxWidth()
                         .padding(horizontal = 24.dp, vertical = 12.dp),
             ) {
+                Surface(
+                    shape = RoundedCornerShape(18.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+                    modifier =
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                val enabled = !manualPitch
+                                onManualPitchChange(enabled)
+                                if (!enabled) {
+                                    pitch = tempo
+                                    applyPlaybackParameters(tempo, tempo)
+                                }
+                            },
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                    ) {
+                        Text(
+                            text = stringResource(R.string.set_tempo_and_pitch_manually),
+                            style = MaterialTheme.typography.bodyLarge,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Switch(
+                            checked = manualPitch,
+                            onCheckedChange = { enabled ->
+                                onManualPitchChange(enabled)
+                                if (!enabled) {
+                                    pitch = tempo
+                                    applyPlaybackParameters(tempo, tempo)
+                                }
+                            },
+                        )
+                    }
+                }
+
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(14.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -1122,7 +1167,7 @@ fun TempoPitchDialog(onDismiss: () -> Unit) {
                     )
 
                     Text(
-                        text = stringResource(R.string.tempo),
+                        text = stringResource(if (manualPitch) R.string.tempo else R.string.tempo_and_pitch),
                         style = MaterialTheme.typography.titleMedium,
                         modifier = Modifier.weight(1f),
                     )
@@ -1143,7 +1188,8 @@ fun TempoPitchDialog(onDismiss: () -> Unit) {
                         enabled = tempo > TempoMin,
                         onClick = {
                             tempo = (tempo - 0.01f).coerceIn(TempoMin, TempoMax).quantize(0.01f)
-                            applyPlaybackParameters(tempo, pitch)
+                            if (!manualPitch) pitch = tempo
+                            applyPlaybackParameters(tempo, if (manualPitch) pitch else tempo)
                         },
                     ) {
                         Icon(
@@ -1152,25 +1198,26 @@ fun TempoPitchDialog(onDismiss: () -> Unit) {
                         )
                     }
 
-                    Slider(
+                    TempoPitchSlider(
                         value = multiplierToSlider(tempo),
                         onValueChange = { slider ->
                             val updated = sliderToMultiplier(slider).quantize(0.01f)
                             if (abs(updated - tempo) >= 0.005f) {
                                 tempo = updated
-                                applyPlaybackParameters(tempo, pitch)
+                                if (!manualPitch) pitch = tempo
+                                applyPlaybackParameters(tempo, if (manualPitch) pitch else tempo)
                             }
                         },
                         valueRange = 0f..1f,
                         modifier = Modifier.weight(1f),
-                        colors = SliderDefaults.colors(),
                     )
 
                     IconButton(
                         enabled = tempo < TempoMax,
                         onClick = {
                             tempo = (tempo + 0.01f).coerceIn(TempoMin, TempoMax).quantize(0.01f)
-                            applyPlaybackParameters(tempo, pitch)
+                            if (!manualPitch) pitch = tempo
+                            applyPlaybackParameters(tempo, if (manualPitch) pitch else tempo)
                         },
                     ) {
                         Icon(
@@ -1195,14 +1242,16 @@ fun TempoPitchDialog(onDismiss: () -> Unit) {
                             selected = selected,
                             onClick = {
                                 tempo = preset
-                                applyPlaybackParameters(tempo, pitch)
+                                if (!manualPitch) pitch = tempo
+                                applyPlaybackParameters(tempo, if (manualPitch) pitch else tempo)
                             },
                             label = { Text("x${formatMultiplier(preset)}") },
                         )
                     }
                 }
 
-                HorizontalDivider()
+                if (manualPitch) {
+                    HorizontalDivider()
 
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(14.dp),
@@ -1238,30 +1287,10 @@ fun TempoPitchDialog(onDismiss: () -> Unit) {
                     )
                 }
 
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier =
-                        Modifier
-                            .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState()),
-                ) {
-                    FilterChip(
-                        selected = pitchMode == PitchMode.Semitones,
-                        onClick = { pitchMode = PitchMode.Semitones },
-                        label = { Text(stringResource(R.string.pitch_mode_semitones_short)) },
-                    )
-                    FilterChip(
-                        selected = pitchMode == PitchMode.Multiplier,
-                        onClick = { pitchMode = PitchMode.Multiplier },
-                        label = { Text(stringResource(R.string.pitch_mode_multiplier_short)) },
-                    )
-                }
-
                 when (pitchMode) {
                     PitchMode.Semitones -> {
                         val currentSemitones = pitchToSemitones(pitch)
-                        Slider(
+                        TempoPitchSlider(
                             value = currentSemitones.toFloat(),
                             onValueChange = { slider ->
                                 val semitones = slider.roundToInt().coerceIn(-12, 12)
@@ -1274,7 +1303,6 @@ fun TempoPitchDialog(onDismiss: () -> Unit) {
                             valueRange = -12f..12f,
                             steps = 23,
                             modifier = Modifier.fillMaxWidth(),
-                            colors = SliderDefaults.colors(),
                         )
 
                         Row(
@@ -1319,7 +1347,7 @@ fun TempoPitchDialog(onDismiss: () -> Unit) {
                                 )
                             }
 
-                            Slider(
+                            TempoPitchSlider(
                                 value = multiplierToSlider(pitch),
                                 onValueChange = { slider ->
                                     val updated = sliderToMultiplier(slider).quantize(0.01f)
@@ -1330,7 +1358,6 @@ fun TempoPitchDialog(onDismiss: () -> Unit) {
                                 },
                                 valueRange = 0f..1f,
                                 modifier = Modifier.weight(1f),
-                                colors = SliderDefaults.colors(),
                             )
 
                             IconButton(
@@ -1370,8 +1397,42 @@ fun TempoPitchDialog(onDismiss: () -> Unit) {
                         }
                     }
                 }
+                }
             }
         },
+    )
+}
+
+@Composable
+private fun TempoPitchSlider(
+    value: Float,
+    onValueChange: (Float) -> Unit,
+    valueRange: ClosedFloatingPointRange<Float>,
+    modifier: Modifier = Modifier,
+    steps: Int = 0,
+) {
+    Slider(
+        value = value.coerceIn(valueRange.start, valueRange.endInclusive),
+        onValueChange = onValueChange,
+        valueRange = valueRange,
+        steps = steps,
+        modifier = modifier.height(44.dp),
+        thumb = {
+            Box(
+                modifier =
+                    Modifier
+                        .size(20.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.primary),
+            )
+        },
+        colors =
+            SliderDefaults.colors(
+                activeTrackColor = MaterialTheme.colorScheme.primary,
+                inactiveTrackColor = MaterialTheme.colorScheme.surfaceVariant,
+                activeTickColor = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.45f),
+                inactiveTickColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f),
+            ),
     )
 }
 
@@ -1405,13 +1466,6 @@ private fun pitchToSemitones(pitch: Float): Int {
 }
 
 private fun semitonesToPitch(semitones: Int): Float = 2f.pow(semitones.toFloat() / 12f).coerceIn(PitchMin, PitchMax)
-
-private fun isPitchSemitoneAligned(pitch: Float): Boolean {
-    val safePitch = pitch.safeCoerceIn(PitchMin, PitchMax, fallback = 1f).coerceAtLeast(0.0001f)
-    val semitones = (12f * log2(safePitch)).roundToInt()
-    val reconstructed = 2f.pow(semitones.toFloat() / 12f)
-    return abs(reconstructed - pitch) < 0.0015f
-}
 
 private fun formatMultiplier(multiplier: Float): String = String.format("%.2f", multiplier)
 

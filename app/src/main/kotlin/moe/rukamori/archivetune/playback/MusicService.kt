@@ -175,6 +175,8 @@ import moe.rukamori.archivetune.constants.PauseListenHistoryKey
 import moe.rukamori.archivetune.constants.PauseOnDeviceMuteKey
 import moe.rukamori.archivetune.constants.PermanentShuffleKey
 import moe.rukamori.archivetune.constants.PersistentQueueKey
+import moe.rukamori.archivetune.constants.PlaybackPitchKey
+import moe.rukamori.archivetune.constants.PlaybackTempoKey
 import moe.rukamori.archivetune.constants.PlayerStreamClient
 import moe.rukamori.archivetune.constants.PlayerStreamClientKey
 import moe.rukamori.archivetune.constants.PlayerVolumeKey
@@ -350,6 +352,8 @@ class MusicService :
     private val binder = MusicBinder()
     private var hasBoundClients = false
     private var idleStopJob: Job? = null
+    private var networkSessionRefreshJob: Job? = null
+    private var networkHandoffGraceDeadlineMs = 0L
 
     private lateinit var connectivityManager: ConnectivityManager
     lateinit var connectivityObserver: NetworkConnectivityObserver
@@ -1206,10 +1210,14 @@ class MusicService :
             val volume = (prefs[PlayerVolumeKey] ?: 1f).coerceIn(0f, 1f)
             val offload = prefs[AudioOffload] ?: false
             val crossfadePrefEnabled = prefs[CrossfadeEnabledKey] ?: false
+            val playbackTempo = (prefs[PlaybackTempoKey] ?: 1f).coerceIn(0.25f, 2f)
+            val playbackPitch = (prefs[PlaybackPitchKey] ?: 1f).coerceIn(0.25f, 2f)
             withContext(Dispatchers.Main) {
                 player.repeatMode = repeatMode
                 playerVolume.value = volume
                 updateAudioOffload(offload && !crossfadePrefEnabled)
+                player.playbackParameters =
+                    androidx.media3.common.PlaybackParameters(playbackTempo, playbackPitch)
             }
         }
 
@@ -1228,6 +1236,12 @@ class MusicService :
                         player.play()
                     }
                 }
+            }
+        }
+
+        scope.launch {
+            connectivityObserver.networkChanges.collect {
+                refreshPlaybackSessionInBackground()
             }
         }
 
@@ -3317,6 +3331,82 @@ class MusicService :
 
     private fun waitOnNetworkError() {
         waitingForNetworkConnection.value = true
+    }
+
+    internal fun shouldSuppressPlaybackError(error: PlaybackException): Boolean {
+        if (android.os.SystemClock.elapsedRealtime() > networkHandoffGraceDeadlineMs) return false
+        return error.errorCode == PlaybackException.ERROR_CODE_IO_UNSPECIFIED ||
+            error.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED ||
+            error.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT ||
+            error.errorCode == PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS
+    }
+
+    private fun refreshPlaybackSessionInBackground() {
+        val mediaItem = player.currentMediaItem ?: return
+        val mediaId = mediaItem.mediaId
+        if (mediaId.isLocalMediaId() || !player.playWhenReady) return
+
+        Timber.tag(TAG).i("Default network changed; prefetching a fresh playback session for %s", mediaId)
+        networkHandoffGraceDeadlineMs =
+            android.os.SystemClock.elapsedRealtime() + NETWORK_HANDOFF_ERROR_GRACE_MS
+        playbackUrlCache.remove(mediaId)
+        extractorPlaybackUrlCache.remove(mediaId)
+        remotePlaybackTrackingUrlCache.remove(mediaId)
+        YTPlayerUtils.invalidateCachedStreamUrls(mediaId)
+        // evictAll only closes idle sockets. The active chunk remains open and keeps playing.
+        mediaOkHttpClient.connectionPool.evictAll()
+        extractorMediaOkHttpClient.connectionPool.evictAll()
+
+        networkSessionRefreshJob?.cancel()
+        networkSessionRefreshJob =
+            ioScope.launch {
+                runCatching {
+                    if (preferredStreamClient == PlayerStreamClient.ARCHIVETUNE_EXTRACTOR) {
+                        val authState = YouTube.currentPlaybackAuthState()
+                        val extraction =
+                            streamingExtractionManager.extractAudio(
+                                videoUrl = mediaId.toYouTubeWatchUrl(),
+                                userPoToken = authState.resolveExtractorPoToken(),
+                                cookies = authState.resolveExtractorCookies(),
+                                userGvsToken = authState.resolveExtractorGvsToken(),
+                            )
+                        extractorPlaybackUrlCache[mediaId] =
+                            AuthScopedCacheValue(
+                                url = extraction.streamUrl,
+                                expiresAtMs = extraction.streamExpiresAt.coerceAtMost(Long.MAX_VALUE / 1_000L) * 1_000L,
+                                authFingerprint = ArchiveTuneExtractorCacheFingerprintPrefix + authState.fingerprint,
+                            )
+                    } else {
+                        val lowDataModeActive = isLowDataModeActive()
+                        val playbackData =
+                            retryWithoutPlaybackLoginContext {
+                                YTPlayerUtils.playerResponseForPlayback(
+                                    videoId = mediaId,
+                                    audioQuality = if (lowDataModeActive) AudioQuality.LOW else audioQuality,
+                                    connectivityManager = connectivityManager,
+                                    preferredStreamClient = preferredStreamClient,
+                                    networkMetered = lowDataModeActive,
+                                )
+                            }.getOrThrow()
+                        if (!lowDataModeActive) {
+                            playbackUrlCache[mediaId] =
+                                AuthScopedCacheValue(
+                                    url = playbackData.streamUrl,
+                                    expiresAtMs =
+                                        System.currentTimeMillis() +
+                                            (playbackData.streamExpiresInSeconds * 1_000L),
+                                    authFingerprint = playbackData.authFingerprint,
+                                )
+                        }
+                    }
+                }.onSuccess {
+                    Timber.tag(TAG).i("Fresh playback session is ready for %s", mediaId)
+                }.onFailure { throwable ->
+                    if (throwable !is CancellationException) {
+                        Timber.tag(TAG).w(throwable, "Could not prefetch playback session for %s", mediaId)
+                    }
+                }
+            }
     }
 
     private fun skipOnError() {
@@ -6851,6 +6941,19 @@ class MusicService :
         val currentMediaId = player.currentMediaItem?.mediaId ?: return
         val isLocalMedia = currentMediaId.isLocalMediaId()
 
+        if (!isLocalMedia && shouldSuppressPlaybackError(error)) {
+            Timber.tag(TAG).i(
+                "Treating transient error during network hand-off as buffering for %s",
+                currentMediaId,
+            )
+            networkSessionRefreshJob?.cancel()
+            playbackUrlCache.remove(currentMediaId)
+            extractorPlaybackUrlCache.remove(currentMediaId)
+            YTPlayerUtils.invalidateCachedStreamUrls(currentMediaId)
+            player.prepare()
+            return
+        }
+
         val isFullyDownloadedMedia =
             runCatching {
                 val contentLength =
@@ -8169,6 +8272,8 @@ class MusicService :
         super.onDestroy()
         effectiveVolumeRampJob?.cancel()
         effectiveVolumeRampJob = null
+        networkSessionRefreshJob?.cancel()
+        networkSessionRefreshJob = null
         cancelCrossfade(resetVolume = false, resetPauseAtEnd = true)
         audioRouteRecoveryJob?.cancel()
         if (audioDeviceCallbackRegistered) {
@@ -8430,6 +8535,7 @@ class MusicService :
         const val ONLINE_PLAYLIST = "online_playlist"
 
         private const val TAG = "MusicService"
+        private const val NETWORK_HANDOFF_ERROR_GRACE_MS = 20_000L
         private const val AUDIO_EFFECT_INITIALIZATION_MAX_ATTEMPTS = 4
         private const val AUDIO_EFFECT_INITIALIZATION_RETRY_DELAY_MS = 250L
         private const val INFINITE_QUEUE_MAX_BOOTSTRAP_PAGES = 3
