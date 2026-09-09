@@ -2641,10 +2641,11 @@ object YouTube {
         return PlaybackAuthState(dataSyncId = this).normalized().dataSyncId
     }
 
-    suspend fun getMediaInfo(videoId: String): Result<MediaInfo> =
-        runCatching {
-            return innerTube.getMediaInfo(videoId)
-        }
+    suspend fun getMediaInfo(videoId: String): Result<MediaInfo> = innerTube.getMediaInfo(videoId)
+
+    suspend fun getMediaMetadata(videoId: String): MediaInfo = innerTube.getMediaMetadata(videoId)
+
+    suspend fun getMediaStatistics(videoId: String) = innerTube.getMediaStatistics(videoId)
 
     @JvmInline
     value class SearchFilter(
