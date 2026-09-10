@@ -976,9 +976,9 @@ object YouTube {
                         isEditable = editable,
                     ),
                 songs =
-                    songContents.getItems().mapNotNull {
-                        PlaylistPage.fromMusicResponsiveListItemRenderer(it, playlistId)
-                    }.distinctByPlaylistEntry(),
+                    songContents
+                        .mapNotNull { content -> content.toPlaylistSongItem(playlistId) }
+                        .distinctByPlaylistEntry(),
                 songsContinuation = songsContinuation,
                 continuation =
                     secondarySection?.continuations?.getContinuation()
@@ -2773,6 +2773,13 @@ private fun SectionListRenderer.Content.playlistSongContinuation(): String? =
         }
     }
 
+private fun MusicShelfRenderer.Content.toPlaylistSongItem(playlistId: String?): SongItem? =
+    musicResponsiveListItemRenderer?.let { renderer ->
+        PlaylistPage.fromMusicResponsiveListItemRenderer(renderer, playlistId)
+    } ?: musicMultiRowListItemRenderer?.let { renderer ->
+        PlaylistPage.fromMusicMultiRowListItemRenderer(renderer)
+    }
+
 internal fun playlistContinuationPageFromResponse(
     response: BrowseResponse,
     playlistId: String? = null,
@@ -2837,10 +2844,8 @@ internal fun playlistContinuationPageFromResponse(
             candidate.copy(
                 songs =
                     candidate.contents
-                        .mapNotNull(MusicShelfRenderer.Content::musicResponsiveListItemRenderer)
-                        .mapNotNull { renderer ->
-                            PlaylistPage.fromMusicResponsiveListItemRenderer(renderer, playlistId)
-                        }.distinctByPlaylistEntry(),
+                        .mapNotNull { content -> content.toPlaylistSongItem(playlistId) }
+                        .distinctByPlaylistEntry(),
             )
         }
 

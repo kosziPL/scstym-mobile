@@ -359,6 +359,11 @@ data class HomePage(
             }
 
             private fun fromMusicMultiRowListItemRenderer(renderer: MusicMultiRowListItemRenderer): YTItem? {
+                val episode = renderer.toEpisodeItem()
+                if (episode != null && (episode.endpoint.isPodcastEpisodeEndpoint || episode.browseId != null)) {
+                    return episode
+                }
+
                 val endpoint =
                     renderer.onTap?.anyWatchEndpoint
                         ?: renderer.overlay
@@ -370,39 +375,6 @@ data class HomePage(
                 val thumbnail = renderer.thumbnail?.musicThumbnailRenderer?.getBestThumbnail()
                 val title = renderer.title?.runs?.joinToString(separator = "") { it.text }
                 if (endpoint == null || thumbnail == null || title.isNullOrBlank()) return null
-
-                val browseId =
-                    renderer.title
-                        ?.runs
-                        ?.firstNotNullOfOrNull { it.navigationEndpoint?.browseEndpoint }
-                        ?.takeIf { it.isPodcastEpisodeEndpoint }
-                        ?.browseId
-                val isEpisode = endpoint.isPodcastEpisodeEndpoint || browseId != null
-                if (isEpisode) {
-                    val subtitleRuns = renderer.subtitle?.runs.orEmpty()
-                    val podcast = subtitleRuns.toPodcastArtist()
-                    val durationText =
-                        renderer.playbackProgress
-                            ?.musicPlaybackProgressRenderer
-                            ?.durationText
-                            ?.runs
-                            ?.asReversed()
-                            ?.firstNotNullOfOrNull { it.text.takeIf { text -> text.parseTime() != null } }
-                    return EpisodeItem(
-                        id = endpoint.videoId ?: return null,
-                        browseId = browseId,
-                        title = title,
-                        podcast = podcast,
-                        description = renderer.description?.runs?.joinToString(separator = "") { it.text }?.takeIf(String::isNotBlank),
-                        dateText = subtitleRuns.episodeDateText(podcast?.name),
-                        durationText = durationText,
-                        duration = durationText?.parseTime(),
-                        thumbnail = thumbnail.normalizedUrl,
-                        endpoint = endpoint,
-                        thumbnailWidth = thumbnail.width,
-                        thumbnailHeight = thumbnail.height,
-                    )
-                }
 
                 return SongItem(
                     id = endpoint.videoId ?: return null,

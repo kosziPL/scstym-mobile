@@ -105,7 +105,7 @@ data class PodcastPage(
     }
 }
 
-private fun MusicMultiRowListItemRenderer.toEpisodeItem(): EpisodeItem? {
+internal fun MusicMultiRowListItemRenderer.toEpisodeItem(): EpisodeItem? {
     val endpoint =
         onTap?.anyWatchEndpoint
             ?: overlay
@@ -121,9 +121,9 @@ private fun MusicMultiRowListItemRenderer.toEpisodeItem(): EpisodeItem? {
         playbackProgress
             ?.musicPlaybackProgressRenderer
             ?.durationText
-            ?.runs
-            ?.asReversed()
-            ?.firstNotNullOfOrNull { it.text.takeIf { text -> text.parseTime() != null } }
+            ?.textOrNull()
+    val subtitleRuns = subtitle?.runs.orEmpty()
+    val podcast = subtitleRuns.toPodcastArtist()
     return EpisodeItem(
         id = videoId,
         browseId =
@@ -133,9 +133,9 @@ private fun MusicMultiRowListItemRenderer.toEpisodeItem(): EpisodeItem? {
                 ?.takeIf { it.isPodcastEpisodeEndpoint }
                 ?.browseId,
         title = itemTitle,
-        podcast = subtitle?.runs.orEmpty().toPodcastArtist(),
+        podcast = podcast,
         description = description?.textOrNull(),
-        dateText = subtitle?.runs?.firstOrNull()?.text?.takeIf(String::isNotBlank),
+        dateText = subtitleRuns.episodeDateText(podcast?.name),
         durationText = durationText,
         duration = durationText?.parseTime(),
         thumbnail = bestThumbnail.normalizedUrl,
@@ -155,3 +155,12 @@ private fun List<Run>.toPodcastArtist(): Artist? =
             ?.takeIf { it.isPodcastShowEndpoint || it.isArtistEndpoint || it.browseId.startsWith("UC") }
             ?.let { Artist(name = run.text, id = it.browseId) }
     }
+
+private fun List<Run>.episodeDateText(podcastName: String?): String? =
+    firstOrNull { run ->
+        val text = run.text.trim()
+        text.isNotBlank() &&
+            text.any(Char::isLetterOrDigit) &&
+            text.parseTime() == null &&
+            text != podcastName
+    }?.text?.trim()

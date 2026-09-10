@@ -9,6 +9,8 @@ package moe.rukamori.archivetune.innertube.pages
 
 import moe.rukamori.archivetune.innertube.models.Album
 import moe.rukamori.archivetune.innertube.models.Artist
+import moe.rukamori.archivetune.innertube.models.EpisodeItem
+import moe.rukamori.archivetune.innertube.models.MusicMultiRowListItemRenderer
 import moe.rukamori.archivetune.innertube.models.MusicResponsiveListItemRenderer
 import moe.rukamori.archivetune.innertube.models.PlaylistItem
 import moe.rukamori.archivetune.innertube.models.Run
@@ -33,7 +35,27 @@ data class PlaylistPage(
             if (playlistId != null && !renderer.belongsToPlaylist(playlistId)) return null
             return renderer.toSongItem(albumColumnIndex = 2)
         }
+
+        fun fromMusicMultiRowListItemRenderer(renderer: MusicMultiRowListItemRenderer): SongItem? =
+            renderer.toEpisodeItem()?.toPlaylistSongItem()
     }
+}
+
+private fun EpisodeItem.toPlaylistSongItem(): SongItem {
+    val podcast = podcast
+    return SongItem(
+        id = id,
+        title = title,
+        artists = podcast?.let(::listOf).orEmpty(),
+        album = podcast?.id?.let { podcastId -> Album(name = podcast.name, id = podcastId) },
+        duration = duration,
+        thumbnail = thumbnail,
+        endpoint = endpoint,
+        setVideoId = endpoint.playlistSetVideoId,
+        thumbnailWidth = thumbnailWidth,
+        thumbnailHeight = thumbnailHeight,
+        isPodcast = true,
+    )
 }
 
 private fun MusicResponsiveListItemRenderer.belongsToPlaylist(playlistId: String): Boolean {
@@ -66,6 +88,7 @@ internal fun MusicResponsiveListItemRenderer.toSongItem(albumColumnIndex: Int? =
         explicit = isExplicit,
         endpoint = endpoint,
         setVideoId = playlistItemData?.playlistSetVideoId ?: endpoint?.playlistSetVideoId,
+        isPodcast = isEpisode,
     )
 }
 
