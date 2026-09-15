@@ -134,9 +134,21 @@ object YouTube {
     var authState: PlaybackAuthState
         get() = mutableAuthState.value
         set(value) {
-            val normalized = value.normalized()
-            mutableAuthState.value = normalized
-            innerTube.applyAuthState(normalized)
+            synchronized(this) {
+                val normalized = value.normalized()
+                innerTube.applyAuthState(normalized)
+                mutableAuthState.value = normalized
+            }
+        }
+
+    fun updateAuthStateIfSessionMatches(expected: PlaybackAuthState, updated: PlaybackAuthState): Boolean =
+        synchronized(this) {
+            val current = authState
+            if (current.cookie != expected.cookie || current.dataSyncId != expected.dataSyncId ||
+                current.visitorData != expected.visitorData
+            ) return@synchronized false
+            authState = updated
+            true
         }
 
     var locale: YouTubeLocale
@@ -2514,11 +2526,13 @@ object YouTube {
 
     private fun JsonObject.parseAccountChannelDataSyncId(sessionId: String?): String? {
         val endpoint = this["serviceEndpoint"] ?: return null
+        endpoint.findStringValue(setOf("dataSyncId"))?.normalizeAccountChannelDataSyncId()?.let { return it }
         val pageId = endpoint.objectsNamed("pageIdToken")
             .firstNotNullOfOrNull { it["pageId"]?.jsonPrimitiveOrNull()?.contentOrNull?.takeIf(String::isNotBlank) }
+            ?: endpoint.findStringValue(setOf("onBehalfOfUser", "delegatedSessionId", "pageId"))
         if (pageId != null) {
             // v15 preserves both the delegated channel and the Google user session.
-            return sessionId?.takeIf(String::isNotBlank)?.let { "$pageId||$it" } ?: pageId
+            return sessionId?.takeIf(String::isNotBlank)?.let { "$pageId||$it" } ?: "$pageId||"
         }
         return endpoint.findDelegationValue()?.normalizeAccountChannelDataSyncId()
     }

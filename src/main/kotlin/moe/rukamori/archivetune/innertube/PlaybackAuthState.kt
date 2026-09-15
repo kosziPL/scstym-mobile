@@ -145,7 +145,7 @@ private fun String?.normalizeDataSyncId(): String? {
     val userSessionId = normalized.substring(separatorIndex + 2).trim()
     return when {
         delegatedSessionId.isBlank() -> userSessionId.takeIf(String::isNotBlank)
-        userSessionId.isBlank() -> delegatedSessionId
+        userSessionId.isBlank() -> "$delegatedSessionId||"
         else -> "$delegatedSessionId||$userSessionId"
     }
 }
@@ -179,4 +179,12 @@ private fun String.decodePercentEscapes(): String {
         index += 1
     }
     return builder.toString()
+}
+
+/** A trailing separator still identifies a delegated channel when the user session is absent. */
+internal fun String?.delegatedSessionIdOrNull(): String? {
+    val value = this?.trim()?.takeIf(String::isNotBlank) ?: return null
+    val separatorIndex = value.indexOf("||")
+    if (separatorIndex <= 0) return null
+    return value.substring(0, separatorIndex).trim().takeIf(String::isNotBlank)
 }

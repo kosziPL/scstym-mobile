@@ -7,6 +7,7 @@
 
 package moe.rukamori.archivetune.innertube.models
 
+import moe.rukamori.archivetune.innertube.delegatedSessionIdOrNull
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
@@ -201,12 +202,4 @@ private fun loadClientCatalog(): YouTubeClientCatalog {
     return resource.bufferedReader().use { reader ->
         clientCatalogJson.decodeFromString(reader.readText())
     }
-}
-
-private fun String?.delegatedSessionIdOrNull(): String? {
-    val value = this?.trim()?.takeIf(String::isNotBlank) ?: return null
-    val separatorIndex = value.indexOf("||")
-    if (separatorIndex <= 0 || separatorIndex + 2 >= value.length) return null
-
-    return value.substring(0, separatorIndex).trim().takeIf(String::isNotBlank)
 }

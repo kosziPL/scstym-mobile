@@ -34,4 +34,48 @@ class AccountChannelsTest {
         """.trimIndent())
         assertEquals("page||user", YouTube.parseAccountChannelsResponse(response).single().dataSyncId)
     }
+    @Test
+    fun pageTokenWithoutResponseSessionStillSelectsChannelInRequestsAfterReload() {
+        val response = Json.parseToJsonElement("""
+            {"accountItemRenderer":{"accountName":{"simpleText":"Brand channel"},
+             "serviceEndpoint":{"selectActiveIdentityEndpoint":{"supportedTokens":[
+               {"pageIdToken":{"pageId":"brand-page"}}]}}}}
+        """.trimIndent())
+        val selected = YouTube.parseAccountChannelsResponse(response).single()
+        val persisted = PlaybackAuthState(dataSyncId = selected.dataSyncId).normalized().dataSyncId
+        val restored = PlaybackAuthState(dataSyncId = persisted).normalized()
+        val request = moe.rukamori.archivetune.innertube.models.YouTubeClient.WEB
+            .copy(supportsCookieAuthentication = true)
+            .toContext(moe.rukamori.archivetune.innertube.models.YouTubeLocale("US", "en"), null, restored.dataSyncId)
+        val requestJson = Json.encodeToString(moe.rukamori.archivetune.innertube.models.Context.serializer(), request)
+        assertTrue(requestJson, requestJson.contains("\"onBehalfOfUser\":\"brand-page\""))
+        assertEquals("brand-page||", restored.dataSyncId)
+    }
+
+    @Test
+    fun explicitDelegationRemainsDifferentFromPersonalGoogleSession() {
+        val delegated = Json.parseToJsonElement("""
+            {"accountItemRenderer":{"accountName":{"simpleText":"Brand"},
+             "serviceEndpoint":{"onBehalfOfUser":"page"}}}
+        """.trimIndent())
+        assertEquals("page||", YouTube.parseAccountChannelsResponse(delegated).single().dataSyncId)
+        assertEquals("page", "page||".delegatedSessionIdOrNull())
+        assertNull("personal-user".delegatedSessionIdOrNull())
+        assertEquals("personal-user", PlaybackAuthState(dataSyncId = "||personal-user").normalized().dataSyncId)
+    }
+
+    @Test
+    fun latePlaybackRepairCannotReplaceAnotherChannelInLiveClient() {
+        val original = YouTube.authState
+        try {
+            val beforeSwitch = PlaybackAuthState(cookie = "SAPISID=synthetic", dataSyncId = "old||user")
+            val selected = beforeSwitch.copy(dataSyncId = "new||user")
+            YouTube.authState = selected
+            assertFalse(YouTube.updateAuthStateIfSessionMatches(beforeSwitch, beforeSwitch.copy(visitorData = "late")))
+            assertEquals(selected, YouTube.authState)
+        } finally {
+            YouTube.authState = original
+        }
+    }
+
 }
