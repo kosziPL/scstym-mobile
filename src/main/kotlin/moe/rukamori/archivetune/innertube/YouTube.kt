@@ -2455,9 +2455,9 @@ object YouTube {
                 }.jsonPrimitive.content
         }
 
-    suspend fun accountInfo(): Result<AccountInfo> =
+    suspend fun accountInfo(authState: PlaybackAuthState = currentPlaybackAuthState()): Result<AccountInfo> =
         runCatching {
-            val response = innerTube.accountMenu(WEB_REMIX).body<AccountMenuResponse>()
+            val response = innerTube.accountMenu(WEB_REMIX, authState).body<AccountMenuResponse>()
             val accountInfo =
                 response.actions
                     .firstOrNull()
@@ -2470,21 +2470,21 @@ object YouTube {
             accountInfo ?: throw IllegalStateException("Failed to get account info - user may not be logged in")
         }
 
-    suspend fun accountChannels(): Result<List<AccountChannel>> =
+    suspend fun accountChannels(authState: PlaybackAuthState = currentPlaybackAuthState()): Result<List<AccountChannel>> =
         runCatching {
             val response =
                 Json.parseToJsonElement(
-                    innerTube.accountChannels(accountSwitcherClient).bodyAsText(),
+                    innerTube.accountChannels(accountSwitcherClient, authState.copy(dataSyncId = null)).bodyAsText(),
                 )
 
             parseAccountChannelsResponse(response)
         }
 
-    suspend fun accountDataSyncId(): Result<String> =
+    suspend fun accountDataSyncId(authState: PlaybackAuthState = currentPlaybackAuthState()): Result<String> =
         runCatching {
             val response =
                 Json.parseToJsonElement(
-                    innerTube.accountChannels(accountSwitcherClient).bodyAsText(),
+                    innerTube.accountChannels(accountSwitcherClient, authState.copy(dataSyncId = null)).bodyAsText(),
                 )
 
             parseAccountChannelsResponse(response).firstOrNull { it.isSelected }?.dataSyncId
@@ -2494,7 +2494,9 @@ object YouTube {
         }
 
     internal fun parseAccountChannelsResponse(response: JsonElement): List<AccountChannel> {
-        val sessionId = response.findMainAppWebDataSyncId()?.substringAfter("||")
+        val responseIdentity = response.findMainAppWebDataSyncId()
+        val sessionId = responseIdentity?.substringAfter("||")?.takeIf(String::isNotBlank)
+            ?: responseIdentity?.substringBefore("||")?.takeIf(String::isNotBlank)
         return response.objectsNamed("accountItemRenderer")
             .mapNotNull { renderer -> parseAccountChannel(renderer, sessionId) }
             .sortedByDescending(AccountChannel::isSelected)
@@ -2526,6 +2528,14 @@ object YouTube {
 
     private fun JsonObject.parseAccountChannelDataSyncId(sessionId: String?): String? {
         val endpoint = this["serviceEndpoint"] ?: return null
+        // A managed-channel invitation can embed a future selection inside a consent
+        // dialog. It is not an active identity and cannot authenticate API requests.
+        if ((endpoint as? JsonObject)?.containsKey("openPopupAction") == true) return null
+        endpoint.objectsNamed("datasyncIdToken").firstNotNullOfOrNull {
+            it["datasyncIdToken"]?.jsonPrimitiveOrNull()?.contentOrNull
+        }?.normalizeAccountChannelDataSyncId()?.let {
+            return if (it.endsWith("||")) it.removeSuffix("||") else it
+        }
         endpoint.findStringValue(setOf("dataSyncId"))?.normalizeAccountChannelDataSyncId()?.let { return it }
         val pageId = endpoint.objectsNamed("pageIdToken")
             .firstNotNullOfOrNull { it["pageId"]?.jsonPrimitiveOrNull()?.contentOrNull?.takeIf(String::isNotBlank) }
@@ -2534,6 +2544,11 @@ object YouTube {
             // v15 preserves both the delegated channel and the Google user session.
             return sessionId?.takeIf(String::isNotBlank)?.let { "$pageId||$it" } ?: "$pageId||"
         }
+        // Personal channels have an account token, not a delegated page. Google's
+        // DATASYNC_ID can be "gaia||" here; sending gaia as X-Goog-PageId yields 401.
+        endpoint.objectsNamed("accountStateToken").firstNotNullOfOrNull {
+            it["obfuscatedGaiaId"]?.jsonPrimitiveOrNull()?.contentOrNull?.takeIf(String::isNotBlank)
+        }?.let { return it }
         return endpoint.findDelegationValue()?.normalizeAccountChannelDataSyncId()
     }
 
@@ -2543,7 +2558,7 @@ object YouTube {
             ?.jsonObjectOrNull()
             ?.get("mainAppWebResponseContext")
             ?.jsonObjectOrNull()
-            ?.get("dataSyncId")
+            ?.let { it["datasyncId"] ?: it["dataSyncId"] }
             ?.jsonPrimitiveOrNull()
             ?.contentOrNull
             ?.normalizeAccountChannelDataSyncId()

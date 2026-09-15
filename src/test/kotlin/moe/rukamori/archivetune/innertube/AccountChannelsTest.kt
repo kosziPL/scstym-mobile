@@ -6,6 +6,56 @@ import org.junit.Test
 
 class AccountChannelsTest {
     @Test
+    fun invitationDialogDoesNotBecomeAnAuthenticatedChannel() {
+        val response = Json.parseToJsonElement("""
+            {"accountItemRenderer":{"accountName":{"simpleText":"Invitation"},
+             "serviceEndpoint":{"openPopupAction":{"popup":{"confirmDialogRenderer":{
+               "confirmButton":{"buttonRenderer":{"command":{"commandExecutorCommand":{"commands":[
+                 {"selectActiveIdentityEndpoint":{"supportedTokens":[
+                   {"datasyncIdToken":{"datasyncIdToken":"invited||user"}}]}}
+               ]}}}}
+             }}}}}}
+        """.trimIndent())
+        assertTrue(YouTube.parseAccountChannelsResponse(response).isEmpty())
+    }
+
+    @Test
+    fun serverDataSyncTokensTakePriorityOverGuessedIdentifiers() {
+        val response = Json.parseToJsonElement("""
+            {"items":[
+              {"accountItemRenderer":{"accountName":{"simpleText":"Personal"},
+               "serviceEndpoint":{"selectActiveIdentityEndpoint":{"supportedTokens":[
+                 {"accountStateToken":{"obfuscatedGaiaId":"personal"}},
+                 {"datasyncIdToken":{"datasyncIdToken":"personal||"}}]}}}},
+              {"accountItemRenderer":{"accountName":{"simpleText":"Brand"},
+               "serviceEndpoint":{"selectActiveIdentityEndpoint":{"supportedTokens":[
+                 {"pageIdToken":{"pageId":"brand"}},
+                 {"datasyncIdToken":{"datasyncIdToken":"brand||actual-session"}}]}}}}
+            ]}
+        """.trimIndent())
+        assertEquals(listOf("personal", "brand||actual-session"), YouTube.parseAccountChannelsResponse(response).map { it.dataSyncId })
+    }
+
+    @Test
+    fun personalAccountTokenIsNotDelegatedEvenWhenResponseDataSyncHasTrailingSeparator() {
+        val response = Json.parseToJsonElement("""
+            {"responseContext":{"mainAppWebResponseContext":{"datasyncId":"personal||"}},
+             "actions":[{"updateChannelSwitcherPageAction":{"page":{"channelSwitcherPageRenderer":{"contents":[
+               {"accountItemRenderer":{"accountName":{"simpleText":"Personal"},"isSelected":true,
+                 "serviceEndpoint":{"selectActiveIdentityEndpoint":{"supportedTokens":[
+                   {"accountStateToken":{"obfuscatedGaiaId":"personal"}}]}}}},
+               {"accountItemRenderer":{"accountName":{"simpleText":"Brand"},
+                 "serviceEndpoint":{"selectActiveIdentityEndpoint":{"supportedTokens":[
+                   {"pageIdToken":{"pageId":"brand"}},{"accountStateToken":{"obfuscatedGaiaId":"brand-gaia"}}]}}}}
+             ]}}}}]}
+        """.trimIndent())
+        val channels = YouTube.parseAccountChannelsResponse(response)
+        assertEquals(listOf("personal", "brand||personal"), channels.map { it.dataSyncId })
+        assertNull(channels[0].dataSyncId.delegatedSessionIdOrNull())
+        assertEquals("brand", channels[1].dataSyncId.delegatedSessionIdOrNull())
+    }
+
+    @Test
     fun modernPageTokensKeepChannelsDistinctAndPreserveUserSession() {
         val response = Json.parseToJsonElement("""
             {"responseContext":{"mainAppWebResponseContext":{"dataSyncId":"default||user"}},

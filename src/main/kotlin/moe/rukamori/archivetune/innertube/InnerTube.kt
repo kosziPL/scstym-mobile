@@ -43,6 +43,7 @@ import kotlin.io.encoding.ExperimentalEncodingApi
  */
 @OptIn(ExperimentalEncodingApi::class)
 class InnerTube {
+    @Volatile
     private var httpClient = createClient()
 
     private companion object {
@@ -86,30 +87,38 @@ class InnerTube {
 
     var proxy: Proxy? = null
         set(value) {
+            if (field == value) return
             field = value
-            httpClient.close()
+            val previous = httpClient
             httpClient = createClient()
+            previous.close()
         }
 
     var proxyUsername: String? = null
         set(value) {
+            if (field == value) return
             field = value
-            httpClient.close()
+            val previous = httpClient
             httpClient = createClient()
+            previous.close()
         }
 
     var proxyPassword: String? = null
         set(value) {
+            if (field == value) return
             field = value
-            httpClient.close()
+            val previous = httpClient
             httpClient = createClient()
+            previous.close()
         }
 
     var dns: Dns = Dns.SYSTEM
         set(value) {
+            if (field == value) return
             field = value
-            httpClient.close()
+            val previous = httpClient
             httpClient = createClient()
+            previous.close()
         }
 
     var useLoginForBrowse: Boolean = false
@@ -241,6 +250,7 @@ class InnerTube {
         maxAttempts: Int = 3,
         initialDelay: Long = 500L,
         factor: Double = 2.0,
+        retryServerErrors: Boolean = false,
         block: suspend () -> T,
     ): T {
         var currentDelay = initialDelay
@@ -249,7 +259,8 @@ class InnerTube {
             try {
                 return block()
             } catch (e: Throwable) {
-                if (e is CancellationException || !e.isTransientNetworkFailure()) throw e
+                if (e is CancellationException) throw e
+                if (!e.isTransientNetworkFailure() && !(retryServerErrors && e is ServerResponseException)) throw e
                 attempt++
                 if (attempt >= maxAttempts) throw e
                 delay(currentDelay)
@@ -545,19 +556,19 @@ class InnerTube {
 
     suspend fun getSwJsData() = withRetry { httpClient.get("https://music.youtube.com/sw.js_data") }
 
-    suspend fun accountMenu(client: YouTubeClient) =
-        withRetry {
+    suspend fun accountMenu(client: YouTubeClient, authState: PlaybackAuthState = currentAuthState()) =
+        withRetry(retryServerErrors = true) {
             httpClient.post("account/account_menu") {
-                ytClient(client, setLogin = true)
-                setBody(AccountMenuBody(client.toContext(locale, visitorData, dataSyncId)))
+                ytClient(client, setLogin = true, authState = authState)
+                setBody(AccountMenuBody(client.toContext(locale, authState.visitorData, authState.dataSyncId)))
             }
         }
 
-    suspend fun accountChannels(client: YouTubeClient) =
-        withRetry {
+    suspend fun accountChannels(client: YouTubeClient, authState: PlaybackAuthState = currentAuthState()) =
+        withRetry(retryServerErrors = true) {
             httpClient.post(client.requestApiUrl("account/accounts_list")) {
-                ytClient(client, setLogin = true)
-                setBody(AccountsListBody(client.toContext(locale, visitorData, dataSyncId)))
+                ytClient(client, setLogin = true, authState = authState)
+                setBody(AccountsListBody(client.toContext(locale, authState.visitorData, authState.dataSyncId)))
             }
         }
 
