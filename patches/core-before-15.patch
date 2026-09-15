@@ -1,0 +1,189 @@
+diff --git a/src/main/kotlin/moe/rukamori/archivetune/innertube/InnerTube.kt b/src/main/kotlin/moe/rukamori/archivetune/innertube/InnerTube.kt
+index e19695a..2af1ab8 100644
+--- a/src/main/kotlin/moe/rukamori/archivetune/innertube/InnerTube.kt
++++ b/src/main/kotlin/moe/rukamori/archivetune/innertube/InnerTube.kt
+@@ -209,6 +209,14 @@ class InnerTube {
+                     val sapisidHash = sha1("$currentTime $loginCookieValue $requestOrigin")
+                     append("Authorization", "SAPISIDHASH ${currentTime}_$sapisidHash")
+                     append("X-Goog-AuthUser", "0")
++
++                    // The cookie selects the Google account. The delegated/page identity selects
++                    // the concrete YouTube channel under that account. Sending it both in the
++                    // request context (onBehalfOfUser) and as X-Goog-PageId keeps account-scoped
++                    // endpoints on the same channel.
++                    authState.dataSyncId
++                        ?.takeIf(String::isNotBlank)
++                        ?.let { append("X-Goog-PageId", it) }
+                 }
+             }
+         }
+@@ -240,6 +248,9 @@ class InnerTube {
+                     val sapisidHash = sha1("$currentTime $loginCookieValue $requestOrigin")
+                     append("Authorization", "SAPISIDHASH ${currentTime}_$sapisidHash")
+                     append("X-Goog-AuthUser", "0")
++                    authState.dataSyncId
++                        ?.takeIf(String::isNotBlank)
++                        ?.let { append("X-Goog-PageId", it) }
+                 }
+             }
+         }
+@@ -408,7 +419,7 @@ class InnerTube {
+         if (!message.contains("/youtubei/v1/player", ignoreCase = true)) return false
+         if (message.contains("Origin doesn't match Host", ignoreCase = true)) return false
+         return message.contains("INVALID_ARGUMENT", ignoreCase = true) ||
+-            message.contains("invalid argument", ignoreCase = true)
++                message.contains("invalid argument", ignoreCase = true)
+     }
+ 
+     suspend fun registerPlayback(
+diff --git a/src/main/kotlin/moe/rukamori/archivetune/innertube/YouTube.kt b/src/main/kotlin/moe/rukamori/archivetune/innertube/YouTube.kt
+index f74862d..12bfd2e 100644
+--- a/src/main/kotlin/moe/rukamori/archivetune/innertube/YouTube.kt
++++ b/src/main/kotlin/moe/rukamori/archivetune/innertube/YouTube.kt
+@@ -1112,7 +1112,7 @@ object YouTube {
+                                 ?.navigationEndpoint
+                                 ?.browseEndpoint
+                                 ?.browseId ==
+-                                BROWSE_ID_NEW_RELEASE_ALBUMS
++                                    BROWSE_ID_NEW_RELEASE_ALBUMS
+                         }?.musicCarouselShelfRenderer
+                         ?.contents
+                         ?.mapNotNull { it.musicTwoRowItemRenderer }
+@@ -1136,7 +1136,7 @@ object YouTube {
+                                 ?.navigationEndpoint
+                                 ?.browseEndpoint
+                                 ?.browseId ==
+-                                BROWSE_ID_MOODS_AND_GENRES
++                                    BROWSE_ID_MOODS_AND_GENRES
+                         }?.musicCarouselShelfRenderer
+                         ?.contents
+                         ?.mapNotNull { it.musicNavigationButtonRenderer }
+@@ -1208,7 +1208,7 @@ object YouTube {
+     private fun Throwable.isBrowsePageUnavailable(): Boolean {
+         val exception = this as? ClientRequestException ?: return false
+         return exception.response.status == HttpStatusCode.NotFound ||
+-            exception.response.status == HttpStatusCode.BadRequest
++                exception.response.status == HttpStatusCode.BadRequest
+     }
+ 
+     private suspend fun <T> withPlaylistMutationAuthRecovery(block: suspend () -> T): T {
+@@ -1239,9 +1239,9 @@ object YouTube {
+ 
+         val currentAuthState = authState
+         return initialAuthState.hasPlaybackLoginContext &&
+-            currentAuthState.hasPlaybackLoginContext &&
+-            currentAuthState.cookie == initialAuthState.cookie &&
+-            currentAuthState.dataSyncId == initialAuthState.dataSyncId
++                currentAuthState.hasPlaybackLoginContext &&
++                currentAuthState.cookie == initialAuthState.cookie &&
++                currentAuthState.dataSyncId == initialAuthState.dataSyncId
+     }
+ 
+     suspend fun moodAndGenres(): Result<List<MoodAndGenres>> =
+@@ -1496,14 +1496,14 @@ object YouTube {
+                         }
+                     }.toMutableList()
+ 
+-        /*
+-         * We need to fetch the artist page when accessing the library because it allows to have
+-         * a proper playEndpoint, which is needed to correctly report the playing indicator in
+-         * the home page.
+-         *
+-         * Despite this, we need to use the old thumbnail because it's the proper format for a
+-         * square picture, which is what we need.
+-         */
++            /*
++             * We need to fetch the artist page when accessing the library because it allows to have
++             * a proper playEndpoint, which is needed to correctly report the playing indicator in
++             * the home page.
++             *
++             * Despite this, we need to use the old thumbnail because it's the proper format for a
++             * square picture, which is what we need.
++             */
+             items.forEachIndexed { index, item ->
+                 if (item is ArtistItem) {
+                     artist(item.id).getOrNull()?.artist?.let { fetchedArtist ->
+@@ -2410,8 +2410,11 @@ object YouTube {
+                     innerTube.accountChannels(accountSwitcherClient).bodyAsText(),
+                 )
+ 
+-            response.findMainAppWebDataSyncId()
+-                ?: response
++            // The account item marked as selected is the best representation of the concrete
++            // YouTube identity. mainAppWebResponseContext can describe the broader/default
++            // Google session, so use it only as a fallback.
++            val channelIdentities =
++                response
+                     .objectsNamed("accountItemRenderer")
+                     .mapNotNull { renderer ->
+                         val isDisabled = renderer.booleanValue("isDisabled") ?: false
+@@ -2421,9 +2424,13 @@ object YouTube {
+                         renderer.parseAccountChannelDataSyncId()?.let { dataSyncId ->
+                             dataSyncId to (renderer.booleanValue("isSelected") ?: false)
+                         }
+-                    }.sortedByDescending { (_, isSelected) -> isSelected }
+-                    .firstOrNull()
+-                    ?.first
++                    }.toList()
++
++            channelIdentities
++                .firstOrNull { (_, isSelected) -> isSelected }
++                ?.first
++                ?: response.findMainAppWebDataSyncId()
++                ?: channelIdentities.firstOrNull()?.first
+                 ?: throw IllegalStateException("Failed to get YouTube DataSyncId")
+         }
+ 
+@@ -2451,8 +2458,13 @@ object YouTube {
+ 
+     private fun JsonObject.parseAccountChannelDataSyncId(): String? =
+         this["serviceEndpoint"]
+-            ?.findDelegationValue()
+-            ?.normalizeAccountChannelDataSyncId()
++            ?.let { endpoint ->
++                // Newer account-list responses expose the concrete Brand/YouTube identity as
++                // selectActiveIdentityEndpoint.supportedTokens[].pageIdToken.pageId.
++                // Prefer that exact value over generic Gaia/account IDs.
++                endpoint.findPageIdTokenPageId()
++                    ?: endpoint.findDelegationValue()
++            }?.normalizeAccountChannelDataSyncId()
+ 
+     private fun JsonElement.findMainAppWebDataSyncId(): String? =
+         (this as? JsonObject)
+@@ -2515,14 +2527,35 @@ object YouTube {
+             ?.let { url -> if (url.startsWith("//")) "https:$url" else url }
+     }
+ 
++    private fun JsonElement.findPageIdTokenPageId(): String? =
++        when (this) {
++            is JsonObject -> {
++                this["pageIdToken"]
++                    ?.jsonObjectOrNull()
++                    ?.get("pageId")
++                    ?.jsonPrimitiveOrNull()
++                    ?.contentOrNull
++                    ?.trim()
++                    ?.takeIf(String::isNotBlank)
++                    ?: values.firstNotNullOfOrNull { it.findPageIdTokenPageId() }
++            }
++
++            is kotlinx.serialization.json.JsonArray -> {
++                firstNotNullOfOrNull { it.findPageIdTokenPageId() }
++            }
++
++            else -> null
++        }
++
+     private fun JsonElement.findDelegationValue(): String? {
+         val directKeys =
+             setOf(
++                "pageId",
+                 "onBehalfOfUser",
++                "delegatedSessionId",
+                 "obfuscatedSelectedGaiaId",
+                 "obfuscatedGaiaId",
+                 "accountId",
+-                "delegatedSessionId",
+             )
+         val fallbackKeys =
+             setOf(
