@@ -23,7 +23,7 @@ suspend fun Result<PlaylistPage>.completed(): Result<PlaylistPage> =
     runCatching {
         val page = getOrThrow()
         completePlaylistPage(page) { continuation ->
-            YouTube.playlistContinuation(continuation, page.playlist.id).getOrNull()
+            YouTube.playlistContinuation(continuation, page.playlist.id).getOrThrow()
         }
     }
 
@@ -38,28 +38,18 @@ internal suspend fun completePlaylistPage(
     val seenContinuations = mutableSetOf<String>()
     var requestCount = 0
     val maxRequests = 500
-    var consecutiveEmptyResponses = 0
 
     while (continuation != null && requestCount < maxRequests) {
-        if (continuation in seenContinuations) {
-            break
-        }
-        seenContinuations.add(continuation)
+        check(seenContinuations.add(continuation)) { "Playlist continuation repeated" }
         requestCount++
 
-        val continuationPage = fetchContinuationPage(continuation) ?: break
-
-        if (continuationPage.songs.isEmpty()) {
-            consecutiveEmptyResponses++
-            if (consecutiveEmptyResponses >= 2) break
-        } else {
-            consecutiveEmptyResponses = 0
-            songs += continuationPage.songs
-        }
+        val continuationPage = checkNotNull(fetchContinuationPage(continuation)) { "Playlist page could not be loaded" }
+        songs += continuationPage.songs
 
         continuation = continuationPage.continuation.normalizedContinuation()
     }
 
+    check(continuation == null) { "Playlist exceeded the continuation limit" }
     return page.copy(
         songs = songs.distinctByPlaylistEntry(),
         songsContinuation = null,

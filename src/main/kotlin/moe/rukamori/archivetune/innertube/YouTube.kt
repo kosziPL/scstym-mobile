@@ -2465,12 +2465,7 @@ object YouTube {
                     innerTube.accountChannels(accountSwitcherClient).bodyAsText(),
                 )
 
-            response
-                .objectsNamed("accountItemRenderer")
-                .mapNotNull(::parseAccountChannel)
-                .sortedByDescending(AccountChannel::isSelected)
-                .distinctBy(AccountChannel::dataSyncId)
-                .toList()
+            parseAccountChannelsResponse(response)
         }
 
     suspend fun accountDataSyncId(): Result<String> =
@@ -2480,29 +2475,27 @@ object YouTube {
                     innerTube.accountChannels(accountSwitcherClient).bodyAsText(),
                 )
 
-            response.findMainAppWebDataSyncId()
-                ?: response
-                    .objectsNamed("accountItemRenderer")
-                    .mapNotNull { renderer ->
-                        val isDisabled = renderer.booleanValue("isDisabled") ?: false
-                        val hasChannel = renderer.booleanValue("hasChannel") ?: true
-                        if (isDisabled || !hasChannel) return@mapNotNull null
-
-                        renderer.parseAccountChannelDataSyncId()?.let { dataSyncId ->
-                            dataSyncId to (renderer.booleanValue("isSelected") ?: false)
-                        }
-                    }.sortedByDescending { (_, isSelected) -> isSelected }
-                    .firstOrNull()
-                    ?.first
+            parseAccountChannelsResponse(response).firstOrNull { it.isSelected }?.dataSyncId
+                ?: response.findMainAppWebDataSyncId()
+                ?: parseAccountChannelsResponse(response).firstOrNull()?.dataSyncId
                 ?: throw IllegalStateException("Failed to get YouTube DataSyncId")
         }
 
-    private fun parseAccountChannel(renderer: JsonObject): AccountChannel? {
+    internal fun parseAccountChannelsResponse(response: JsonElement): List<AccountChannel> {
+        val sessionId = response.findMainAppWebDataSyncId()?.substringAfter("||")
+        return response.objectsNamed("accountItemRenderer")
+            .mapNotNull { renderer -> parseAccountChannel(renderer, sessionId) }
+            .sortedByDescending(AccountChannel::isSelected)
+            .distinctBy(AccountChannel::dataSyncId)
+            .toList()
+    }
+
+    private fun parseAccountChannel(renderer: JsonObject, sessionId: String?): AccountChannel? {
         val isDisabled = renderer.booleanValue("isDisabled") ?: false
         val hasChannel = renderer.booleanValue("hasChannel") ?: true
         if (isDisabled || !hasChannel) return null
 
-        val dataSyncId = renderer.parseAccountChannelDataSyncId() ?: return null
+        val dataSyncId = renderer.parseAccountChannelDataSyncId(sessionId) ?: return null
 
         val name = renderer["accountName"].textValue() ?: return null
         val byline = renderer["accountByline"].textValue()
@@ -2519,10 +2512,16 @@ object YouTube {
         )
     }
 
-    private fun JsonObject.parseAccountChannelDataSyncId(): String? =
-        this["serviceEndpoint"]
-            ?.findDelegationValue()
-            ?.normalizeAccountChannelDataSyncId()
+    private fun JsonObject.parseAccountChannelDataSyncId(sessionId: String?): String? {
+        val endpoint = this["serviceEndpoint"] ?: return null
+        val pageId = endpoint.objectsNamed("pageIdToken")
+            .firstNotNullOfOrNull { it["pageId"]?.jsonPrimitiveOrNull()?.contentOrNull?.takeIf(String::isNotBlank) }
+        if (pageId != null) {
+            // v15 preserves both the delegated channel and the Google user session.
+            return sessionId?.takeIf(String::isNotBlank)?.let { "$pageId||$it" } ?: pageId
+        }
+        return endpoint.findDelegationValue()?.normalizeAccountChannelDataSyncId()
+    }
 
     private fun JsonElement.findMainAppWebDataSyncId(): String? =
         (this as? JsonObject)
