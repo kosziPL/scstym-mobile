@@ -21,6 +21,7 @@ kotlin {
 }
 
 dependencies {
+    testImplementation(libs.junit)
     implementation(libs.coroutines.core)
     implementation(libs.okhttp)
     implementation(libs.quickjs.kt)

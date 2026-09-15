@@ -12,7 +12,6 @@ import java.security.MessageDigest
 
 internal class YoutubeiRequestAuthentication private constructor(
     private val cookie: String,
-    private val userSessionId: String?,
     private val delegatedSessionId: String?,
 ) {
     private val cookies =
@@ -47,6 +46,7 @@ internal class YoutubeiRequestAuthentication private constructor(
             .header("Origin", origin)
             .header("X-Origin", origin)
             .header("X-Youtube-Bootstrap-Logged-In", "true")
+            .header("X-Goog-AuthUser", "0")
             .apply {
                 if (delegatedSessionId != null) {
                     header("X-Goog-PageId", delegatedSessionId)
@@ -64,12 +64,13 @@ internal class YoutubeiRequestAuthentication private constructor(
         timestamp: Long,
     ): String? {
         if (sid == null) return null
-        val input = listOfNotNull(userSessionId, timestamp.toString(), sid, origin).joinToString(" ")
+        // Account/channel IDs are not an additional signing secret. Use the standard
+        // cookie signature, matching the authenticated browse client.
+        val input = "$timestamp $sid $origin"
         val hash = MessageDigest.getInstance("SHA-1")
             .digest(input.toByteArray(Charsets.UTF_8))
             .joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }
-        val suffix = if (userSessionId == null) "" else "_u"
-        return "$scheme ${timestamp}_$hash$suffix"
+        return "$scheme ${timestamp}_$hash"
     }
 
     companion object {
@@ -79,13 +80,13 @@ internal class YoutubeiRequestAuthentication private constructor(
             val cookie = request.optString("cookie").trim().takeIf { it.isNotEmpty() && it != "null" }
                 ?: return null
             val dataSyncId = request.optString("dataSyncId").trim().takeIf { it.isNotEmpty() && it != "null" }
+            return fromSession(cookie, dataSyncId)
+        }
+
+        internal fun fromSession(cookie: String, dataSyncId: String?): YoutubeiRequestAuthentication {
             val first = dataSyncId?.substringBefore("||")?.trim()?.takeIf(String::isNotEmpty)
             val second = dataSyncId?.substringAfter("||", "")?.trim()?.takeIf(String::isNotEmpty)
-            return YoutubeiRequestAuthentication(
-                cookie = cookie,
-                userSessionId = second ?: first,
-                delegatedSessionId = first.takeIf { second != null },
-            )
+            return YoutubeiRequestAuthentication(cookie, first.takeIf { second != null })
         }
     }
 }
