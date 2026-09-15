@@ -342,6 +342,7 @@ class MainActivity : ComponentActivity() {
 
     private var playerConnection by mutableStateOf<PlayerConnection?>(null)
     private var isMusicServiceBound = false
+    private var lastBoundMusicService = java.lang.ref.WeakReference<MusicService>(null)
     private var immersiveStatusBarsHidden = false
 
     private val serviceConnection =
@@ -350,10 +351,13 @@ class MainActivity : ComponentActivity() {
                 name: ComponentName?,
                 service: IBinder?,
             ) {
-                isMusicServiceBound = true
-                if (service is MusicBinder) {
+                if (!isMusicServiceBound || isDestroyed) return
+                val musicService = (service as? MusicBinder)?.service
+                if (musicService != null) {
+                    lastBoundMusicService = java.lang.ref.WeakReference(musicService)
+                    releasePlayerConnection()
                     playerConnection =
-                        PlayerConnection(this@MainActivity, service, database, lifecycleScope)
+                        PlayerConnection(this@MainActivity, musicService, database, lifecycleScope)
                     playPendingDeepLinkQueueIfReady()
                     playPendingVoiceSearchIfReady()
                     openPendingAodModeIfReady()
@@ -362,11 +366,16 @@ class MainActivity : ComponentActivity() {
             }
 
             override fun onServiceDisconnected(name: ComponentName?) {
-                isMusicServiceBound = false
-                pendingAodModeJob?.cancel()
-                pendingAodModeJob = null
-                playerConnection?.dispose()
-                playerConnection = null
+                // The binding remains registered; Android may reconnect it.
+                releasePlayerConnection()
+            }
+
+            override fun onBindingDied(name: ComponentName?) {
+                safeUnbindMusicService()
+            }
+
+            override fun onNullBinding(name: ComponentName?) {
+                safeUnbindMusicService()
             }
         }
 
@@ -443,17 +452,26 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
-        isMusicServiceBound =
-            bindService(
+        if (!isMusicServiceBound) {
+            isMusicServiceBound = bindService(
                 Intent(this, MusicService::class.java),
                 serviceConnection,
                 Context.BIND_AUTO_CREATE,
             )
+        }
         playPendingDeepLinkQueueIfReady()
         openPendingAodModeIfReady()
     }
 
+    private fun releasePlayerConnection() {
+        pendingAodModeJob?.cancel()
+        pendingAodModeJob = null
+        playerConnection?.dispose()
+        playerConnection = null
+    }
+
     private fun safeUnbindMusicService() {
+        releasePlayerConnection()
         if (!isMusicServiceBound) return
         try {
             unbindService(serviceConnection)
@@ -485,11 +503,13 @@ class MainActivity : ComponentActivity() {
             }
 
         if (shouldStopOnTaskClear) {
-            playerConnection?.service?.stopAndClearPlayback(clearPersistentState = true)
+            (playerConnection?.service ?: lastBoundMusicService.get())?.stopAndClearPlayback(clearPersistentState = true)
             safeUnbindMusicService()
             stopService(Intent(this, MusicService::class.java))
-            playerConnection = null
         }
+        // onServiceDisconnected is not called for a normal unbind.
+        safeUnbindMusicService()
+        lastBoundMusicService.clear()
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {

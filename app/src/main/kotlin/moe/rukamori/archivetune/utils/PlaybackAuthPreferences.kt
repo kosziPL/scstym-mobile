@@ -103,7 +103,9 @@ suspend fun <T> Context.retryWithoutPlaybackLoginContext(block: suspend () -> Re
         return initialResult
     }
 
-    YouTube.authState = currentAuthState.withoutPlaybackLoginContext()
+    if (!YouTube.updateAuthStateIfSessionMatches(currentAuthState, currentAuthState.withoutPlaybackLoginContext())) {
+        return initialResult
+    }
     YTPlayerUtils.clearPlaybackAuthCaches()
     var retryAuthState: PlaybackAuthState? = null
     val retryResult =
@@ -134,24 +136,32 @@ private fun restoreTemporaryPlaybackLoginContext(
     if (repairedAuthState.dataSyncId != null) return
     if (repairedAuthState.cookie != initialAuthState.cookie) return
     if (YouTube.currentPlaybackAuthState().fingerprint != repairedAuthState.fingerprint) return
-    YouTube.authState = repairedAuthState.copy(dataSyncId = dataSyncId).normalized()
+    YouTube.updateAuthStateIfSessionMatches(repairedAuthState, repairedAuthState.copy(dataSyncId = dataSyncId).normalized())
 }
 
 private suspend fun Context.persistPlaybackAuthRepair(
     initialAuthState: PlaybackAuthState,
     repairedAuthState: PlaybackAuthState,
 ) {
-    if (initialAuthState.cookie != repairedAuthState.cookie) return
-    if (initialAuthState.fingerprint == repairedAuthState.fingerprint) return
-
     dataStore.edit { preferences ->
-        repairedAuthState.visitorData
-            ?.takeIf { it.isNotBlank() && it != initialAuthState.visitorData }
-            ?.let { preferences[VisitorDataKey] = it }
-        repairedAuthState.dataSyncId
-            ?.takeIf { it.isNotBlank() && it != initialAuthState.dataSyncId }
-            ?.let { preferences[DataSyncIdKey] = it }
+        preferences.applyPlaybackAuthRepair(initialAuthState, repairedAuthState)
     }
+}
+
+internal fun MutablePreferences.applyPlaybackAuthRepair(
+    initialAuthState: PlaybackAuthState,
+    repairedAuthState: PlaybackAuthState,
+) {
+    val persisted = toPlaybackAuthState()
+    if (persisted.cookie != initialAuthState.cookie || persisted.dataSyncId != initialAuthState.dataSyncId ||
+        persisted.visitorData != initialAuthState.visitorData || repairedAuthState.cookie != initialAuthState.cookie
+    ) return
+    // A player retry may refresh the same channel's session, never choose another channel.
+    val previousChannel = initialAuthState.dataSyncId?.substringBefore("||")
+    val repairedChannel = repairedAuthState.dataSyncId?.substringBefore("||")
+    if (previousChannel != null && repairedChannel != null && previousChannel != repairedChannel) return
+    repairedAuthState.visitorData?.takeIf(String::isNotBlank)?.let { this[VisitorDataKey] = it }
+    repairedAuthState.dataSyncId?.takeIf(String::isNotBlank)?.let { this[DataSyncIdKey] = it }
 }
 
 internal fun shouldRetryWithoutPlaybackLoginContext(

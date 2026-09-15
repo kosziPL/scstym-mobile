@@ -9,7 +9,6 @@ package moe.rukamori.archivetune.viewmodels
 
 import android.content.Context
 import androidx.compose.runtime.Immutable
-import androidx.datastore.preferences.core.edit
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.common.collect.ImmutableList
@@ -30,10 +29,6 @@ import moe.rukamori.archivetune.aicontentfilter.FilterAiContentUseCase
 import moe.rukamori.archivetune.aicontentfilter.LoadAiContentFilterPolicyUseCase
 import moe.rukamori.archivetune.aicontentfilter.ObserveAiContentFilterUseCase
 import moe.rukamori.archivetune.auth.SwitchSavedYouTubeAccountUseCase
-import moe.rukamori.archivetune.constants.AccountChannelHandleKey
-import moe.rukamori.archivetune.constants.AccountEmailKey
-import moe.rukamori.archivetune.constants.AccountNameKey
-import moe.rukamori.archivetune.constants.DataSyncIdKey
 import moe.rukamori.archivetune.constants.HideExplicitKey
 import moe.rukamori.archivetune.constants.HideVideoKey
 import moe.rukamori.archivetune.constants.QuickPicks
@@ -196,6 +191,7 @@ class HomeViewModel
         private val database: MusicDatabase,
         private val syncUtils: SyncUtils,
         private val switchSavedYouTubeAccount: SwitchSavedYouTubeAccountUseCase,
+        private val loginRepository: moe.rukamori.archivetune.auth.YouTubeLoginRepository,
         observeHomePresentationPreferences: ObserveHomePresentationPreferencesUseCase,
         observeAiContentFilter: ObserveAiContentFilterUseCase,
         private val loadAiContentFilterPolicy: LoadAiContentFilterPolicyUseCase,
@@ -326,7 +322,6 @@ class HomeViewModel
                 initialValue = HomeScreenState.Loading,
             )
 
-        private var previousLoginState: Boolean? = null
         private var chipLoadJob: Job? = null
 
         private fun HomePage.extractQuickPicks(): Pair<HomePage, HomePage.Section?> {
@@ -970,20 +965,12 @@ class HomeViewModel
                     beginAccountRefresh()
                     _accountChannelsState.value = AccountChannelsState.Loading
 
-                    context.dataStore.edit { preferences ->
-                        preferences[DataSyncIdKey] = channel.dataSyncId
-                        preferences[AccountNameKey] = channel.name
-                        preferences[AccountChannelHandleKey] = channel.channelHandle
-                        if (channel.byline.contains("@")) {
-                            preferences[AccountEmailKey] = channel.byline
-                        }
-                    }
-
-                    val authState =
-                        context.dataStore.data
-                            .first()
-                            .toPlaybackAuthState()
-                    YouTube.authState = authState
+                    val authState = loginRepository.switchAccountChannel(
+                        dataSyncId = channel.dataSyncId,
+                        name = channel.name,
+                        email = channel.byline.takeIf { it.contains("@") },
+                        handle = channel.channelHandle,
+                    ).getOrThrow()
 
                     if (forceSyncOnSwitch && context.dataStore.get(YtmSyncKey, true) && authState.hasLoginCookie) {
                         syncUtils.clearRemoteLibraryState()
@@ -1040,8 +1027,6 @@ class HomeViewModel
                         try {
                             val isLoggedIn = authState.hasLoginCookie
                             YouTube.authState = authState
-                            val loginTransition = previousLoginState == false && isLoggedIn
-                            previousLoginState = isLoggedIn
 
                             if (isLoggedIn) {
                                 load()
@@ -1052,21 +1037,7 @@ class HomeViewModel
                                     launch { refreshAccountIdentity(refreshGeneration) }
                                     launch { refreshAccountPlaylistsInternal(refreshGeneration) }
                                 }
-
-                                if (loginTransition) {
-                                    launch {
-                                        try {
-                                            if (context.dataStore.get(YtmSyncKey, true)) {
-                                                syncUtils.performFullSync()
-                                            }
-                                        } catch (e: Exception) {
-                                            Timber.e(e, "Error during login-triggered sync")
-                                            reportException(e)
-                                        }
-                                    }
-                                }
                             } else {
-                                syncUtils.clearRemoteLibraryState()
                                 clearAccountData()
                             }
                         } catch (e: CancellationException) {

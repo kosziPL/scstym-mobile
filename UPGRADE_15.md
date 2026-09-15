@@ -46,3 +46,26 @@ Device checks still needed: real Google/YouTube login and channel switching,
 sheet dismissal, a long playlist with shuffle on/off, and tempo/pitch after
 restarting the app. Automated tests do not verify the live YouTube service or
 visual animation quality.
+
+## Account persistence and service lifecycle follow-up
+
+- A `pageIdToken` without `mainAppWebResponseContext.dataSyncId` is represented
+  as `channel||`, preserving its delegated identity through normalization and
+  disk reload. Both request headers and the serialized request context use the
+  same delegated-ID parser. A personal Google session remains non-delegated.
+- Channel changes commit the session to DataStore before publishing it to the
+  client. Login/account mutations are serialized; failed verification restores
+  the committed session. Delayed player repairs cannot overwrite a newer
+  account or silently replace a selected channel with the default channel.
+- Application-scoped account observation invalidates playback sessions and
+  refreshes the remote library on startup and channel changes, including changes sharing
+  the same Google cookie. This no longer depends on HomeViewModel being alive.
+- MusicBinder is a nested class with a weak service reference, explicitly cleared
+  on service destruction. Normal unbinding disposes PlayerConnection listeners
+  and its coroutine scope. Reconnection, activity destruction and AOD teardown
+  also release old connections, while AOD does not bind twice on activity restart.
+
+Regression tests additionally serialize actual YouTube request contexts, reopen
+an on-disk preference store, and simulate stale playback repairs after a channel
+switch. Device validation should include switching channels, restarting the app,
+repeated background/foreground cycles, and inspecting a new LeakCanary report.

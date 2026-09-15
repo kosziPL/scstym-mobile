@@ -226,7 +226,7 @@ object YTPlayerUtils {
                 reason = "all stream clients failed",
             )
         if (refreshedAuthState.fingerprint != authState.fingerprint) {
-            YouTube.authState = refreshedAuthState
+            YouTube.updateAuthStateIfSessionMatches(authState, refreshedAuthState)
         }
         clearPlaybackAuthCaches()
     }
@@ -295,9 +295,13 @@ object YTPlayerUtils {
                         reportException(it)
                     }.getOrNull()
                     ?.let { channels ->
-                        channels.firstOrNull { it.dataSyncId == authState.dataSyncId }
-                            ?: channels.firstOrNull { it.isSelected }
-                            ?: channels.firstOrNull()
+                        if (authState.dataSyncId != null) {
+                            channels.firstOrNull {
+                                it.dataSyncId.substringBefore("||") == authState.dataSyncId?.substringBefore("||")
+                            }
+                        } else {
+                            channels.firstOrNull { it.isSelected }
+                        }
                     }
 
             val refreshedDataSyncId = activeChannel?.dataSyncId?.takeIf { it.isNotBlank() }
@@ -337,7 +341,7 @@ object YTPlayerUtils {
         }
 
         if (repairedAuthState.fingerprint != authState.fingerprint) {
-            YouTube.authState = repairedAuthState
+            YouTube.updateAuthStateIfSessionMatches(authState, repairedAuthState)
             clearPlaybackAuthCaches()
         }
 
@@ -456,7 +460,7 @@ object YTPlayerUtils {
             ).normalized()
         val currentAuthState = YouTube.currentPlaybackAuthState()
         if (hasSamePlaybackSession(currentAuthState)) {
-            YouTube.authState =
+            YouTube.updateAuthStateIfSessionMatches(currentAuthState,
                 currentAuthState
                     .copy(
                         poTokenGvs = tokenResult.playerToken,
@@ -467,7 +471,8 @@ object YTPlayerUtils {
                         poTokenSubs = tokenResult.playerToken,
                         poTokenSubsVideoId = videoId,
                         webClientPoTokenEnabled = true,
-                    ).normalized()
+                    ).normalized(),
+            )
         }
         return updatedAuthState
     }

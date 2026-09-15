@@ -109,6 +109,9 @@ class App :
                 ?.processName
         }
 
+    @Inject
+    lateinit var accountSync: moe.rukamori.archivetune.utils.SyncUtils
+
     @OptIn(DelicateCoroutinesApi::class)
     override fun onCreate() {
         super.onCreate()
@@ -271,15 +274,36 @@ class App :
         }
 
         applicationScope.launch(Dispatchers.IO) {
+            var previousFingerprint: String? = null
+            var previousAccount: Pair<String?, String?>? = null
+            var accountSyncJob: kotlinx.coroutines.Job? = null
+            var tokenWarmupJob: kotlinx.coroutines.Job? = null
             dataStore.data
                 .map { it.toPlaybackAuthState() }
                 .distinctUntilChanged()
                 .collect { authState ->
-                    val previousFingerprint = YouTube.currentPlaybackAuthState().fingerprint
+                    val account = authState.cookie to authState.dataSyncId
+                    val accountChanged = previousAccount != null && previousAccount != account
+                    val restoreAccountLibrary = previousAccount == null && authState.hasLoginCookie
                     YouTube.authState = authState
                     if (previousFingerprint != authState.fingerprint) {
                         YTPlayerUtils.clearPlaybackAuthCaches()
                         youtubeiStreamRepository.invalidateSessions()
+                    }
+                    previousFingerprint = authState.fingerprint
+                    previousAccount = account
+                    if (accountChanged || restoreAccountLibrary) {
+                        accountSyncJob?.cancel()
+                        accountSyncJob = applicationScope.launch(Dispatchers.IO) {
+                            if (authState.hasLoginCookie) {
+                                accountSync.performFullSync(authoritative = true)
+                            } else {
+                                accountSync.clearRemoteLibraryState()
+                            }
+                        }
+                    }
+                    tokenWarmupJob?.cancel()
+                    tokenWarmupJob = applicationScope.launch(Dispatchers.IO) {
                         YTPlayerUtils.preWarmYoutubeiPoTokens(authState)
                     }
                 }

@@ -39,7 +39,6 @@ import moe.rukamori.archivetune.extensions.currentMetadata
 import moe.rukamori.archivetune.extensions.getCurrentQueueIndex
 import moe.rukamori.archivetune.extensions.getQueueWindows
 import moe.rukamori.archivetune.models.MediaMetadata
-import moe.rukamori.archivetune.playback.MusicService.MusicBinder
 import moe.rukamori.archivetune.playback.queues.Queue
 import moe.rukamori.archivetune.canvas.CanvasPlaybackRequest
 import moe.rukamori.archivetune.utils.isLocalMediaId
@@ -55,11 +54,14 @@ internal enum class CanvasArtworkRefetchResult {
 @OptIn(ExperimentalCoroutinesApi::class)
 class PlayerConnection(
     context: Context,
-    binder: MusicBinder,
+    val service: MusicService,
     val database: MusicDatabase,
     scope: CoroutineScope,
 ) : Player.Listener {
-    val service = binder.service
+    private val connectionJob = kotlinx.coroutines.SupervisorJob(scope.coroutineContext[Job])
+    private val connectionScope = CoroutineScope(scope.coroutineContext + connectionJob)
+    private val applicationContext = context.applicationContext
+    private var disposed = false
     val player = service.player
     val localPlayer = service.localPlayer
 
@@ -101,7 +103,7 @@ class PlayerConnection(
 
     internal val canvasNetworkAllowed = service.canvasPlaybackUseCase.policy
         .map { it.networkAllowed }
-        .stateIn(scope, kotlinx.coroutines.flow.SharingStarted.WhileSubscribed(5_000), false)
+        .stateIn(connectionScope, kotlinx.coroutines.flow.SharingStarted.WhileSubscribed(5_000), false)
 
     private val canvasArtworkRefetchMutex = Mutex()
     private val _isCanvasArtworkRefetching = MutableStateFlow(false)
@@ -126,7 +128,7 @@ class PlayerConnection(
         }
 
         metadataExtractionJob =
-            scope.launch(Dispatchers.IO) {
+            connectionScope.launch(Dispatchers.IO) {
                 mediaMetadata
                     .distinctUntilChangedBy { it?.id }
                     .collectLatest { metadata ->
@@ -135,7 +137,7 @@ class PlayerConnection(
                             val storedFormat = database.format(mediaId).first()
                             if (storedFormat != null && storedFormat.bitrate == 0 && storedFormat.sampleRate == null) {
                                 val result =
-                                    extractLocalAudioProperties(context, mediaId)
+                                    extractLocalAudioProperties(applicationContext, mediaId)
                                         ?: return@collectLatest
                                 ensureActive()
                                 val finalBitrate =
@@ -408,6 +410,9 @@ class PlayerConnection(
     }
 
     fun dispose() {
+        if (disposed) return
+        disposed = true
+        connectionJob.cancel()
         player.removeListener(this)
         metadataExtractionJob?.cancel()
         metadataExtractionJob = null

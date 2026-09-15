@@ -12,7 +12,10 @@ import androidx.datastore.preferences.core.edit
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import moe.rukamori.archivetune.constants.AccountChannelHandleKey
 import moe.rukamori.archivetune.constants.AccountEmailKey
@@ -55,13 +58,31 @@ class YouTubeLoginRepository
     constructor(
         @ApplicationContext private val context: Context,
     ) {
+        private val sessionMutationMutex = Mutex()
+
+        private suspend fun <T> mutateSession(block: suspend () -> T): Result<T> =
+            sessionMutationMutex.withLock {
+                runCatchingPreservingCancellation {
+                    try {
+                        block()
+                    } catch (failure: Throwable) {
+                        // Verification may temporarily change the live client before persistence.
+                        // On failure/cancellation restore the last committed session.
+                        withContext(NonCancellable) {
+                            YouTube.authState = context.dataStore.data.first().toPlaybackAuthState()
+                        }
+                        throw failure
+                    }
+                }
+            }
+
         suspend fun completeLogin(
             cookie: String,
             visitorData: String?,
             dataSyncId: String?,
         ): Result<YouTubeLoginSession> =
             withContext(Dispatchers.IO) {
-                runCatchingPreservingCancellation {
+                mutateSession {
                     val normalizedCookie = cookie.trim()
                     check(hasYouTubeLoginCookie(normalizedCookie)) { "YouTube login cookie is missing" }
                     check(hasCompleteYouTubeLoginCookies(normalizedCookie)) { "YouTube login cookies are incomplete" }
@@ -97,7 +118,7 @@ class YouTubeLoginRepository
 
         suspend fun switchSavedAccount(account: SavedAccount): Result<PlaybackAuthState> =
             withContext(Dispatchers.IO) {
-                runCatchingPreservingCancellation {
+                mutateSession {
                     check(hasYouTubeLoginCookie(account.innerTubeCookie)) { "Saved account login cookie is missing" }
                     check(hasCompleteYouTubeLoginCookies(account.innerTubeCookie)) {
                         "Saved account login cookies are incomplete"
@@ -149,8 +170,24 @@ class YouTubeLoginRepository
                     context.dataStore.data
                         .first()
                         .toPlaybackAuthState()
+                        .also { YouTube.authState = it }
                 }
             }
+
+        suspend fun switchAccountChannel(
+            dataSyncId: String,
+            name: String,
+            email: String?,
+            handle: String,
+        ): Result<PlaybackAuthState> = withContext(Dispatchers.IO) {
+            mutateSession {
+                val previous = context.dataStore.data.first().toPlaybackAuthState()
+                val resolvedIdentity = resolveRequiredDataSyncId(dataSyncId)
+                context.dataStore.persistYouTubeChannel(resolvedIdentity, name, email, handle, previous.cookie) {
+                    YouTube.authState = it
+                }
+            }
+        }
 
         suspend fun saveLoginContext(
             visitorData: String? = null,

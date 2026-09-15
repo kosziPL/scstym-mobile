@@ -362,7 +362,7 @@ class MusicService :
     private var scopeJob = SupervisorJob()
     private var scope = CoroutineScope(Dispatchers.Main + scopeJob)
     private var ioScope = CoroutineScope(Dispatchers.IO + scopeJob)
-    private val binder = MusicBinder()
+    private val binder = MusicBinder(this)
     private var hasBoundClients = false
     private var idleStopJob: Job? = null
     private var networkSessionRefreshJob: Job? = null
@@ -8354,6 +8354,7 @@ class MusicService :
     }
 
     override fun onDestroy() {
+        binder.clear()
         equalizerPlaybackController.detach(this)
         sponsorBlockPlaybackController.detach()
         discordServiceStopping = true
@@ -8589,9 +8590,12 @@ class MusicService :
         widgetUpdater.updateProgressTracking()
     }
 
-    inner class MusicBinder : Binder() {
-        val service: MusicService
-            get() = this@MusicService
+    class MusicBinder(service: MusicService) : Binder() {
+        private val serviceReference = java.lang.ref.WeakReference(service)
+        val service: MusicService?
+            get() = serviceReference.get()
+
+        fun clear() = serviceReference.clear()
     }
 
     companion object {

@@ -74,12 +74,14 @@ class AodDreamService :
     private var playerConnection by mutableStateOf<PlayerConnection?>(null)
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
-            if (binder is MusicService.MusicBinder) {
-                playerConnection = PlayerConnection(this@AodDreamService, binder, database, serviceScope)
-            }
+            if (lifecycle.currentState == Lifecycle.State.DESTROYED) return
+            val musicService = (binder as? MusicService.MusicBinder)?.service ?: return
+            playerConnection?.dispose()
+            playerConnection = PlayerConnection(this@AodDreamService, musicService, database, serviceScope)
         }
 
         override fun onServiceDisconnected(name: ComponentName?) {
+            playerConnection?.dispose()
             playerConnection = null
         }
     }

@@ -129,6 +129,8 @@ class SyncUtils
                             syncAutoSyncPlaylists()
                         }
                     }
+                } catch (e: CancellationException) {
+                    throw e
                 } catch (e: Exception) {
                     Timber.e(e, "Error during full sync")
                 } finally {
