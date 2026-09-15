@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="youtube_channels_unavailable">Nie udało się pobrać kanałów YouTube. Ponów próbę lub zaloguj się ponownie, jeśli problem się utrzymuje.</string>
+    <string name="youtube_session_rejected">YouTube odrzucił sesję konta. Otwórz ustawienia konta i zaloguj się ponownie.</string>
     <string name="home">Strona Główna</string>
     <string name="songs">Piosenki</string>
     <string name="artists">Artyści</string>

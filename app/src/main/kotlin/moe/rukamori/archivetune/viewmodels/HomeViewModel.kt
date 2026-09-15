@@ -570,7 +570,9 @@ class HomeViewModel
                         val page =
                             YouTube.home().getOrElse { throwable ->
                                 reportException(throwable)
-                                loadError.value = R.string.error_unknown
+                                loadError.value = if ((throwable as? io.ktor.client.plugins.ResponseException)?.response?.status?.value == 401) {
+                                    R.string.youtube_session_rejected
+                                } else R.string.error_unknown
                                 return@launch
                             }
                         val filteredPage =
@@ -709,6 +711,12 @@ class HomeViewModel
         }
 
         private fun beginAccountRefresh(): Long = accountRefreshGeneration.incrementAndGet()
+
+        fun retryAccountChannels() {
+            viewModelScope.launch(Dispatchers.IO) {
+                refreshAccountIdentity(beginAccountRefresh())
+            }
+        }
 
         private fun isCurrentAccountRefresh(refreshGeneration: Long): Boolean =
             accountRefreshGeneration.get() == refreshGeneration
@@ -967,9 +975,7 @@ class HomeViewModel
 
                     val authState = loginRepository.switchAccountChannel(
                         dataSyncId = channel.dataSyncId,
-                        name = channel.name,
                         email = channel.byline.takeIf { it.contains("@") },
-                        handle = channel.channelHandle,
                     ).getOrThrow()
 
                     if (forceSyncOnSwitch && context.dataStore.get(YtmSyncKey, true) && authState.hasLoginCookie) {
@@ -1018,15 +1024,13 @@ class HomeViewModel
             }
 
             viewModelScope.launch(Dispatchers.IO) {
-                context.dataStore.data
-                    .map { it.toPlaybackAuthState() }
+                YouTube.authStateFlow
                     .distinctUntilChanged { old, new ->
                         old.cookie == new.cookie && old.visitorData == new.visitorData && old.dataSyncId == new.dataSyncId
                     }
                     .collectLatest { authState ->
                         try {
                             val isLoggedIn = authState.hasLoginCookie
-                            YouTube.authState = authState
 
                             if (isLoggedIn) {
                                 load()

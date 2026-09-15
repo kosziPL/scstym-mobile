@@ -317,6 +317,12 @@ fun BottomSheetPlayer(
     val bottomSheetPageState = LocalBottomSheetPageState.current
 
     val playerConnection = LocalPlayerConnection.current ?: return
+    // Android content capture can retain an old semantics node after this composition leaves.
+    // Its keyboard callback must not keep the connection and a destroyed service alive.
+    val keyboardConnection = remember(playerConnection) { java.lang.ref.WeakReference(playerConnection) }
+    DisposableEffect(keyboardConnection) {
+        onDispose { keyboardConnection.clear() }
+    }
     val playbackError by playerConnection.error.collectAsStateWithLifecycle()
     val (innerTubeCookie) = rememberPreference(InnerTubeCookieKey, defaultValue = "")
     val isYouTubeLoggedIn =
@@ -982,6 +988,7 @@ fun BottomSheetPlayer(
                 .focusRequester(focusRequester)
                 .focusable()
                 .onKeyEvent { keyEvent ->
+                    val playerConnection = keyboardConnection.get() ?: return@onKeyEvent false
                     if (keyEvent.type != KeyEventType.KeyDown || state.isCollapsed) return@onKeyEvent false
 
                     when (keyEvent.key) {

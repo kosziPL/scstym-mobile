@@ -6669,8 +6669,8 @@ class MusicService :
         }
 
         val remotePlaybackTracking =
-            retryWithoutPlaybackLoginContext {
-                YTPlayerUtils.playerResponseForMetadata(mediaId)
+            retryWithoutPlaybackLoginContext { requestAuthState ->
+                YTPlayerUtils.playerResponseForMetadata(mediaId, authState = requestAuthState)
             }.onFailure { throwable ->
                 if (throwable is CancellationException) {
                     throw throwable

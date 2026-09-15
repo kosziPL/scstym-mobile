@@ -18,7 +18,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import moe.rukamori.archivetune.auth.CompleteYouTubeLoginUseCase
 import moe.rukamori.archivetune.auth.MissingYouTubeDataSyncIdException
-import moe.rukamori.archivetune.auth.UpdateYouTubeLoginContextUseCase
 import moe.rukamori.archivetune.innertube.PlaybackAuthState
 import timber.log.Timber
 import javax.inject.Inject
@@ -55,7 +54,6 @@ class LoginViewModel
     @Inject
     constructor(
         private val completeYouTubeLogin: CompleteYouTubeLoginUseCase,
-        private val updateYouTubeLoginContext: UpdateYouTubeLoginContextUseCase,
     ) : ViewModel() {
         private val _screenState = MutableStateFlow<LoginScreenState>(LoginScreenState.Empty)
         val screenState: StateFlow<LoginScreenState> = _screenState.asStateFlow()
@@ -69,9 +67,6 @@ class LoginViewModel
         fun onVisitorDataExtracted(visitorData: String?) {
             val normalized = visitorData.normalizeAuthValue() ?: return
             latestVisitorData = normalized
-            viewModelScope.launch {
-                updateYouTubeLoginContext(visitorData = normalized)
-            }
         }
 
         fun onDataSyncIdExtracted(dataSyncId: String?) {
@@ -82,9 +77,6 @@ class LoginViewModel
             if (currentState is LoginScreenState.Success && currentState.account.dataSyncId != normalized) return
 
             latestDataSyncId = normalized
-            viewModelScope.launch {
-                updateYouTubeLoginContext(dataSyncId = normalized)
-            }
             activeCookie?.let { startLogin(it, replaceActive = true) }
         }
 

@@ -112,6 +112,9 @@ class App :
     @Inject
     lateinit var accountSync: moe.rukamori.archivetune.utils.SyncUtils
 
+    @Inject
+    lateinit var loginRepository: moe.rukamori.archivetune.auth.YouTubeLoginRepository
+
     @OptIn(DelicateCoroutinesApi::class)
     override fun onCreate() {
         super.onCreate()
@@ -296,6 +299,12 @@ class App :
                         accountSyncJob?.cancel()
                         accountSyncJob = applicationScope.launch(Dispatchers.IO) {
                             if (authState.hasLoginCookie) {
+                                val repaired = loginRepository.repairStoredAccount(authState).getOrElse {
+                                    reportException(it)
+                                    return@launch
+                                }
+                                // The committed identity triggers a new collection and sync.
+                                if (repaired.cookie != authState.cookie || repaired.dataSyncId != authState.dataSyncId) return@launch
                                 accountSync.performFullSync(authoritative = true)
                             } else {
                                 accountSync.clearRemoteLibraryState()

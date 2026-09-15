@@ -407,6 +407,8 @@ dependencies {
 
     implementation(libs.timber)
     testImplementation(libs.junit)
+    androidTestImplementation("androidx.test:runner:1.7.0")
+    androidTestImplementation(libs.junit)
     testImplementation(libs.turbine)
     implementation(libs.translator)
     implementation("androidx.lifecycle:lifecycle-process:2.11.0")

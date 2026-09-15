@@ -1097,6 +1097,8 @@
     <string name="unsaved_account_dialog_no_thanks">No thanks</string>
     <string name="unsaved_account_dialog_save_yes">Yes, save current account</string>
     <string name="youtube_channels">YouTube channels</string>
+    <string name="youtube_channels_unavailable">Could not load YouTube channels. Retry, or sign in again if the problem persists.</string>
+    <string name="youtube_session_rejected">YouTube rejected the account session. Open Account settings and sign in again.</string>
     <string name="hidden_playlists">Hidden playlists</string>
     <string name="hidden_playlists_description">Playlists hidden from library appear here</string>
     <string name="no_hidden_playlists">No hidden playlists</string>

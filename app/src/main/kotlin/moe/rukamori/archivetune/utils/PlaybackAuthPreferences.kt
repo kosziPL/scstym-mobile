@@ -84,59 +84,22 @@ suspend fun Context.resetPlaybackLoginContext(): PlaybackAuthState {
     return authState
 }
 
-suspend fun <T> Context.retryWithoutPlaybackLoginContext(block: suspend () -> Result<T>): Result<T> {
+suspend fun <T> Context.retryWithoutPlaybackLoginContext(
+    block: suspend (PlaybackAuthState) -> Result<T>,
+): Result<T> {
     val initialAuthState = YouTube.currentPlaybackAuthState()
-    val initialResult = block()
+    val initialResult = block(initialAuthState)
     if (initialResult.isSuccess) {
-        val repairedAuthState = YouTube.currentPlaybackAuthState()
-        restoreTemporaryPlaybackLoginContext(initialAuthState, repairedAuthState)
-        persistPlaybackAuthRepair(
-            initialAuthState = initialAuthState,
-            repairedAuthState = repairedAuthState,
-        )
+        persistPlaybackAuthRepair(initialAuthState, YouTube.currentPlaybackAuthState())
         return initialResult
     }
-    val failure = initialResult.exceptionOrNull()
-
     val currentAuthState = YouTube.currentPlaybackAuthState()
-    if (!shouldRetryWithoutPlaybackLoginContext(initialAuthState, currentAuthState, failure)) {
+    if (!shouldRetryWithoutPlaybackLoginContext(initialAuthState, currentAuthState, initialResult.exceptionOrNull())) {
         return initialResult
     }
-
-    if (!YouTube.updateAuthStateIfSessionMatches(currentAuthState, currentAuthState.withoutPlaybackLoginContext())) {
-        return initialResult
-    }
-    YTPlayerUtils.clearPlaybackAuthCaches()
-    var retryAuthState: PlaybackAuthState? = null
-    val retryResult =
-        try {
-            block().also {
-                retryAuthState = YouTube.currentPlaybackAuthState()
-            }
-        } finally {
-            restoreTemporaryPlaybackLoginContext(
-                initialAuthState = currentAuthState,
-                repairedAuthState = retryAuthState ?: YouTube.currentPlaybackAuthState(),
-            )
-        }
-    if (retryResult.isSuccess) {
-        persistPlaybackAuthRepair(
-            initialAuthState = currentAuthState,
-            repairedAuthState = requireNotNull(retryAuthState),
-        )
-    }
-    return retryResult
-}
-
-private fun restoreTemporaryPlaybackLoginContext(
-    initialAuthState: PlaybackAuthState,
-    repairedAuthState: PlaybackAuthState,
-) {
-    val dataSyncId = initialAuthState.dataSyncId ?: return
-    if (repairedAuthState.dataSyncId != null) return
-    if (repairedAuthState.cookie != initialAuthState.cookie) return
-    if (YouTube.currentPlaybackAuthState().fingerprint != repairedAuthState.fingerprint) return
-    YouTube.updateAuthStateIfSessionMatches(repairedAuthState, repairedAuthState.copy(dataSyncId = dataSyncId).normalized())
+    // A metadata retry must not publish a temporary account to the UI, sync jobs,
+    // or other concurrent playback requests. Keep its credentials request-local.
+    return block(currentAuthState.withoutPlaybackLoginContext())
 }
 
 private suspend fun Context.persistPlaybackAuthRepair(

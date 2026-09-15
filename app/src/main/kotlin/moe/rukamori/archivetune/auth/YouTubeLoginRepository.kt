@@ -66,8 +66,8 @@ class YouTubeLoginRepository
                     try {
                         block()
                     } catch (failure: Throwable) {
-                        // Verification may temporarily change the live client before persistence.
-                        // On failure/cancellation restore the last committed session.
+                        // Cancellation can race with a successful disk commit. Always publish
+                        // the latest committed session, never an unverified candidate.
                         withContext(NonCancellable) {
                             YouTube.authState = context.dataStore.data.first().toPlaybackAuthState()
                         }
@@ -93,19 +93,15 @@ class YouTubeLoginRepository
                             visitorData = visitorData,
                             dataSyncId = dataSyncId,
                         ).normalized()
-                    val verificationAuthState = initialAuthState.copy(dataSyncId = null)
-                    YouTube.authState = verificationAuthState
-
-                    val accountInfo = YouTube.accountInfo().getOrThrow()
-
-                    val resolvedDataSyncId = resolveRequiredDataSyncId(initialAuthState.dataSyncId)
+                    val resolvedDataSyncId = resolveRequiredDataSyncId(initialAuthState)
                     val resolvedAuthState = initialAuthState.copy(dataSyncId = resolvedDataSyncId).normalized()
-                    YouTube.authState = resolvedAuthState
+                    val accountInfo = YouTube.accountInfo(resolvedAuthState).getOrThrow()
 
                     persistLoginSession(
                         authState = resolvedAuthState,
                         accountInfo = accountInfo,
                     )
+                    YouTube.authState = context.dataStore.data.first().toPlaybackAuthState()
 
                     YouTubeLoginSession(
                         authState = resolvedAuthState,
@@ -130,11 +126,9 @@ class YouTubeLoginRepository
                             visitorData = account.visitorData,
                             dataSyncId = account.dataSyncId,
                         ).normalized()
-                    YouTube.authState = initialAuthState
-
-                    val resolvedDataSyncId = resolveRequiredDataSyncId(initialAuthState.dataSyncId)
+                    val resolvedDataSyncId = resolveRequiredDataSyncId(initialAuthState)
                     val resolvedAuthState = initialAuthState.copy(dataSyncId = resolvedDataSyncId).normalized()
-                    YouTube.authState = resolvedAuthState
+                    val verifiedInfo = YouTube.accountInfo(resolvedAuthState).getOrThrow()
 
                     context.dataStore.edit { preferences ->
                         preferences[InnerTubeCookieKey] = account.innerTubeCookie
@@ -143,9 +137,9 @@ class YouTubeLoginRepository
                             ?.let { preferences[VisitorDataKey] = it }
                             ?: preferences.remove(VisitorDataKey)
                         preferences[DataSyncIdKey] = resolvedDataSyncId
-                        preferences[AccountNameKey] = account.name
+                        preferences[AccountNameKey] = verifiedInfo.name
                         preferences[AccountEmailKey] = account.email
-                        preferences[AccountChannelHandleKey] = account.channelHandle
+                        preferences[AccountChannelHandleKey] = verifiedInfo.channelHandle.orEmpty()
                         preferences.remove(PoTokenKey)
                         preferences.remove(PoTokenGvsKey)
                         preferences.remove(PoTokenPlayerKey)
@@ -176,37 +170,48 @@ class YouTubeLoginRepository
 
         suspend fun switchAccountChannel(
             dataSyncId: String,
-            name: String,
             email: String?,
-            handle: String,
         ): Result<PlaybackAuthState> = withContext(Dispatchers.IO) {
             mutateSession {
                 val previous = context.dataStore.data.first().toPlaybackAuthState()
-                val resolvedIdentity = resolveRequiredDataSyncId(dataSyncId)
-                context.dataStore.persistYouTubeChannel(resolvedIdentity, name, email, handle, previous.cookie) {
+                val resolvedIdentity = resolveRequiredDataSyncId(previous.copy(dataSyncId = dataSyncId))
+                val verified = YouTube.accountInfo(previous.copy(dataSyncId = resolvedIdentity)).getOrThrow()
+                context.dataStore.persistYouTubeChannel(resolvedIdentity, verified.name, verified.email ?: email, verified.channelHandle.orEmpty(), previous.cookie) {
                     YouTube.authState = it
                 }
             }
         }
 
-        suspend fun saveLoginContext(
-            visitorData: String? = null,
-            dataSyncId: String? = null,
-        ) {
+        /** Repair the old personal "gaia||" marker without changing the selected channel. */
+        suspend fun repairStoredAccount(expected: PlaybackAuthState): Result<PlaybackAuthState> =
             withContext(Dispatchers.IO) {
-                val normalizedVisitorData = visitorData.normalizeAuthValue()
-                val normalizedDataSyncId = dataSyncId.normalizeDataSyncId()
-                if (normalizedVisitorData == null && normalizedDataSyncId == null) return@withContext
-
-                context.dataStore.edit { preferences ->
-                    normalizedVisitorData?.let { preferences[VisitorDataKey] = it }
-                    normalizedDataSyncId?.let { preferences[DataSyncIdKey] = it }
+                mutateSession {
+                    val current = context.dataStore.data.first().toPlaybackAuthState()
+                    if (current.cookie != expected.cookie || current.dataSyncId != expected.dataSyncId) return@mutateSession current
+                    val identity = resolveRequiredDataSyncId(current)
+                    if (identity == current.dataSyncId) return@mutateSession current
+                    val repaired = current.copy(dataSyncId = identity)
+                    val info = YouTube.accountInfo(repaired).getOrThrow()
+                    val committed = context.dataStore.edit { preferences ->
+                        val latest = preferences.toPlaybackAuthState()
+                        check(latest.cookie == current.cookie && latest.dataSyncId == current.dataSyncId) {
+                            "Account changed while repairing its identity"
+                        }
+                        preferences[DataSyncIdKey] = identity
+                        preferences[AccountNameKey] = info.name
+                        preferences[AccountChannelHandleKey] = info.channelHandle.orEmpty()
+                        preferences.remove(PoTokenKey)
+                        preferences.remove(PoTokenGvsKey)
+                        preferences.remove(PoTokenPlayerKey)
+                        val saved = decodeSavedAccounts(preferences[SavedAccountsKey].orEmpty())
+                        preferences[SavedAccountsKey] = encodeSavedAccounts(saved.map {
+                            if (it.innerTubeCookie == current.cookie && it.dataSyncId == current.dataSyncId) it.copy(dataSyncId = identity) else it
+                        })
+                    }.toPlaybackAuthState()
+                    YouTube.authState = committed
+                    committed
                 }
-
-                normalizedVisitorData?.let { YouTube.visitorData = it }
-                normalizedDataSyncId?.let { YouTube.dataSyncId = it }
             }
-        }
 
         private suspend fun persistLoginSession(
             authState: PlaybackAuthState,
@@ -229,25 +234,18 @@ class YouTubeLoginRepository
             }
         }
 
-        private suspend fun resolveRequiredDataSyncId(candidate: String?): String {
-            candidate.normalizeDataSyncId()?.let { savedIdentity ->
-                if (savedIdentity.contains("||")) return savedIdentity
-                // v14 stored only the channel ID. Upgrade it to v15's channel/user pair
-                // without replacing the explicitly selected channel with the default one.
-                val channels = YouTube.accountChannels().getOrThrow()
-                return channels.firstOrNull { it.dataSyncId.substringBefore("||") == savedIdentity }
-                    ?.dataSyncId ?: savedIdentity
+        private suspend fun resolveRequiredDataSyncId(authState: PlaybackAuthState): String {
+            val channels = YouTube.accountChannels(authState).getOrThrow()
+            val candidate = authState.dataSyncId.normalizeDataSyncId()
+            val selected = if (candidate == null) {
+                channels.firstOrNull { it.isSelected }
+            } else {
+                channels.firstOrNull { it.dataSyncId == candidate }
+                    ?: channels.firstOrNull { it.dataSyncId.substringBefore("||") == candidate.substringBefore("||") }
             }
-            val networkDataSyncId =
-                YouTube
-                    .accountDataSyncId()
-                    .getOrNull()
-                    .normalizeDataSyncId()
-
-            return networkDataSyncId
-                ?: candidate.normalizeDataSyncId()
-                ?: throw MissingYouTubeDataSyncIdException()
+            return selected?.dataSyncId ?: throw MissingYouTubeDataSyncIdException()
         }
+
     }
 
 class CompleteYouTubeLoginUseCase
@@ -273,22 +271,6 @@ class SwitchSavedYouTubeAccountUseCase
         private val repository: YouTubeLoginRepository,
     ) {
         suspend operator fun invoke(account: SavedAccount): Result<PlaybackAuthState> = repository.switchSavedAccount(account)
-    }
-
-class UpdateYouTubeLoginContextUseCase
-    @Inject
-    constructor(
-        private val repository: YouTubeLoginRepository,
-    ) {
-        suspend operator fun invoke(
-            visitorData: String? = null,
-            dataSyncId: String? = null,
-        ) {
-            repository.saveLoginContext(
-                visitorData = visitorData,
-                dataSyncId = dataSyncId,
-            )
-        }
     }
 
 private suspend inline fun <T> runCatchingPreservingCancellation(crossinline block: suspend () -> T): Result<T> =

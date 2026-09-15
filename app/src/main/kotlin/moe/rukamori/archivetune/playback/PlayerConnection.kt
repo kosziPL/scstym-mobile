@@ -54,7 +54,7 @@ internal enum class CanvasArtworkRefetchResult {
 @OptIn(ExperimentalCoroutinesApi::class)
 class PlayerConnection(
     context: Context,
-    val service: MusicService,
+    service: MusicService,
     val database: MusicDatabase,
     scope: CoroutineScope,
 ) : Player.Listener {
@@ -62,8 +62,17 @@ class PlayerConnection(
     private val connectionScope = CoroutineScope(scope.coroutineContext + connectionJob)
     private val applicationContext = context.applicationContext
     private var disposed = false
-    val player = service.player
-    val localPlayer = service.localPlayer
+    // Compose/content capture may retain old callbacks after unbinding. A disposed
+    // connection must release the entire playback graph, not just its listeners.
+    private var connectedService: MusicService? = service
+    private var connectedPlayer: Player? = service.player
+    private var connectedLocalPlayer: androidx.media3.exoplayer.ExoPlayer? = service.localPlayer
+    val service: MusicService
+        get() = checkNotNull(connectedService) { "PlayerConnection is disposed" }
+    val player: Player
+        get() = checkNotNull(connectedPlayer) { "PlayerConnection is disposed" }
+    val localPlayer: androidx.media3.exoplayer.ExoPlayer
+        get() = checkNotNull(connectedLocalPlayer) { "PlayerConnection is disposed" }
 
     val playbackState = MutableStateFlow(player.playbackState)
     private val _isPlaying = MutableStateFlow(player.isPlaying)
@@ -231,34 +240,41 @@ class PlayerConnection(
         }
 
     fun playQueue(queue: Queue) {
+        if (disposed) return
         service.playQueue(queue)
     }
 
     fun startRadioSeamlessly() {
+        if (disposed) return
         service.startRadioSeamlessly()
     }
 
     fun playNext(item: MediaItem) = playNext(listOf(item))
 
     fun playNext(items: List<MediaItem>) {
+        if (disposed) return
         service.playNext(items)
     }
 
     fun moveQueueItemToNext(mediaItemIndex: Int) {
+        if (disposed) return
         service.moveQueueItemToNext(mediaItemIndex)
     }
 
     fun addToQueue(item: MediaItem) = addToQueue(listOf(item))
 
     fun addToQueue(items: List<MediaItem>) {
+        if (disposed) return
         service.addToQueue(items)
     }
 
     fun playFromVoiceSearch(query: String) {
+        if (disposed) return
         service.playFromVoiceSearch(query)
     }
 
     fun toggleLike() {
+        if (disposed) return
         service.toggleLike()
     }
 
@@ -266,6 +282,7 @@ class PlayerConnection(
         metadata: MediaMetadata,
         requireVertical: Boolean,
     ): CanvasArtworkRefetchResult {
+        if (disposed) return CanvasArtworkRefetchResult.Failure
         if (!canvasArtworkRefetchMutex.tryLock()) return CanvasArtworkRefetchResult.AlreadyRunning
 
         _isCanvasArtworkRefetching.value = true
@@ -296,11 +313,13 @@ class PlayerConnection(
     }
 
     fun dismissPlaybackError() {
+        if (disposed) return
         dismissedPlaybackError = error.value ?: player.playerError
         error.value = null
     }
 
     fun seekToNext() {
+        if (disposed) return
         val state = service.togetherSessionState.value as? moe.rukamori.archivetune.together.TogetherSessionState.Joined
         if (state?.role is moe.rukamori.archivetune.together.TogetherRole.Guest) {
             service.requestTogetherControl(moe.rukamori.archivetune.together.ControlAction.SkipNext)
@@ -312,6 +331,7 @@ class PlayerConnection(
     }
 
     fun seekToPrevious() {
+        if (disposed) return
         val state = service.togetherSessionState.value as? moe.rukamori.archivetune.together.TogetherSessionState.Joined
         if (state?.role is moe.rukamori.archivetune.together.TogetherRole.Guest) {
             service.requestTogetherControl(moe.rukamori.archivetune.together.ControlAction.SkipPrevious)
@@ -323,15 +343,18 @@ class PlayerConnection(
     }
 
     override fun onPlaybackStateChanged(state: Int) {
+        if (disposed) return
         playbackState.value = state
         updatePlaybackError(player.playerError)
     }
 
     override fun onIsPlayingChanged(isPlaying: Boolean) {
+        if (disposed) return
         _isPlaying.value = isPlaying
     }
 
     override fun onPlaybackParametersChanged(playbackParameters: PlaybackParameters) {
+        if (disposed) return
         this.playbackParameters.value = playbackParameters
     }
 
@@ -339,6 +362,7 @@ class PlayerConnection(
         mediaItem: MediaItem?,
         reason: Int,
     ) {
+        if (disposed) return
         currentMediaItemIndex.value = player.currentMediaItemIndex
         currentWindowIndex.value = player.getCurrentQueueIndex()
         updateCanSkipPreviousAndNext()
@@ -348,6 +372,7 @@ class PlayerConnection(
         timeline: Timeline,
         reason: Int,
     ) {
+        if (disposed) return
         queueWindows.value = player.getQueueWindows()
         queueTitle.value = service.queueTitle
         currentMediaItemIndex.value = player.currentMediaItemIndex
@@ -356,6 +381,7 @@ class PlayerConnection(
     }
 
     override fun onShuffleModeEnabledChanged(enabled: Boolean) {
+        if (disposed) return
         shuffleModeEnabled.value = enabled
         queueWindows.value = player.getQueueWindows()
         currentWindowIndex.value = player.getCurrentQueueIndex()
@@ -363,11 +389,13 @@ class PlayerConnection(
     }
 
     override fun onRepeatModeChanged(mode: Int) {
+        if (disposed) return
         repeatMode.value = mode
         updateCanSkipPreviousAndNext()
     }
 
     override fun onPlayerErrorChanged(playbackError: PlaybackException?) {
+        if (disposed) return
         if (playbackError != null && !service.shouldSuppressPlaybackError(playbackError)) {
             reportException(playbackError)
         }
@@ -416,5 +444,8 @@ class PlayerConnection(
         player.removeListener(this)
         metadataExtractionJob?.cancel()
         metadataExtractionJob = null
+        connectedPlayer = null
+        connectedLocalPlayer = null
+        connectedService = null
     }
 }

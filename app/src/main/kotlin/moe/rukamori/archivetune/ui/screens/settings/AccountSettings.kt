@@ -514,6 +514,8 @@ fun AccountSettings(
             activeInnerTubeCookie = innerTubeCookie,
             activeDataSyncId = dataSyncId,
             accountChannels = stableAccountChannels,
+            accountChannelsState = accountChannelsState,
+            onRetryChannels = viewModel::retryAccountChannels,
             onSaveAccount = saveCurrentAccount,
             onSwitchAccount = switchToAccount,
             onSwitchAccountChannel = switchToAccountChannel,
@@ -785,6 +787,8 @@ private fun AccountSwitcherSheet(
     activeInnerTubeCookie: String,
     activeDataSyncId: String,
     accountChannels: List<AccountChannelUiModel>,
+    accountChannelsState: AccountChannelsState,
+    onRetryChannels: () -> Unit,
     onSaveAccount: () -> Unit,
     onSwitchAccount: (SavedAccount) -> Unit,
     onSwitchAccountChannel: (AccountChannelUiModel) -> Unit,
@@ -833,6 +837,19 @@ private fun AccountSwitcherSheet(
             contentPadding = PaddingValues(start = 16.dp, top = 8.dp, end = 16.dp, bottom = 32.dp),
             verticalArrangement = Arrangement.spacedBy(ListItemDefaults.SegmentedGap),
         ) {
+            if (isLoggedIn && accountChannelsState !is AccountChannelsState.Success) {
+                item(key = "channel_status") {
+                    Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 12.dp)) {
+                        AccountSheetSectionLabel(text = stringResource(R.string.youtube_channels))
+                        if (accountChannelsState is AccountChannelsState.Loading) {
+                            androidx.compose.material3.CircularProgressIndicator()
+                        } else {
+                            Text(text = stringResource(R.string.youtube_channels_unavailable))
+                            TextButton(onClick = onRetryChannels) { Text(stringResource(R.string.retry)) }
+                        }
+                    }
+                }
+            }
             if (switchableChannels.isNotEmpty()) {
                 item(key = "channel_header", contentType = "header") {
                     AccountSheetSectionLabel(text = stringResource(R.string.youtube_channels))
