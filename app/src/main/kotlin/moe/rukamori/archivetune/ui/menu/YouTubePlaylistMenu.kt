@@ -516,7 +516,7 @@ fun YouTubePlaylistMenu(
                             },
                             text = shuffleText,
                             onClick = {
-                                playerConnection.playQueue(YouTubeQueue.playlist(shuffleEndpoint))
+                                playerConnection.playQueue(YouTubeQueue.playlist(shuffleEndpoint, shuffle = true))
                                 onDismiss()
                             },
                         ),

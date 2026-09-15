@@ -197,7 +197,7 @@ fun NewReleaseScreen(
                             )
                             Spacer(Modifier.height(16.dp))
                             Text(
-                                text = "New releases are temporarily unavailable",
+                                text = stringResource(R.string.network_unavailable),
                                 style = MaterialTheme.typography.titleLarge,
                                 color = MaterialTheme.colorScheme.onSurface,
                                 textAlign = TextAlign.Center,

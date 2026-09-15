@@ -53,6 +53,7 @@ import androidx.compose.material3.LargeFlexibleTopAppBar
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedIconButton
 import androidx.compose.material3.Scaffold
@@ -70,6 +71,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -86,10 +88,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavController
 import coil3.compose.AsyncImage
+import kotlinx.coroutines.launch
 import moe.rukamori.archivetune.App.Companion.forgetAccount
 import moe.rukamori.archivetune.BuildConfig
 import moe.rukamori.archivetune.LocalPlayerAwareWindowInsets
@@ -139,6 +141,7 @@ private data class SavedAccountCollection(
 fun AccountSettings(
     navController: NavController,
     latestVersionName: String,
+    viewModel: HomeViewModel,
 ) {
     val context = LocalContext.current
     val uriHandler = LocalUriHandler.current
@@ -183,7 +186,6 @@ fun AccountSettings(
         YouTube.useLoginForBrowse = useLoginForBrowse
     }
 
-    val viewModel: HomeViewModel = hiltViewModel()
     val accountNameFromViewModel by viewModel.accountName.collectAsStateWithLifecycle()
     val accountImageUrl by viewModel.accountImageUrl.collectAsStateWithLifecycle()
     val accountChannelsState by viewModel.accountChannelsState.collectAsStateWithLifecycle()
@@ -191,7 +193,7 @@ fun AccountSettings(
     // Keep the last successful channel list while the ViewModel briefly moves through
     // loading states during an account/channel switch. This prevents the entire channel
     // section from disappearing and then popping back into the sheet.
-    var stableAccountChannels by remember { mutableStateOf<List<AccountChannelUiModel>>(emptyList()) }
+    var stableAccountChannels by remember(innerTubeCookie) { mutableStateOf<List<AccountChannelUiModel>>(emptyList()) }
     LaunchedEffect(accountChannelsState, isLoggedIn) {
         if (!isLoggedIn) {
             stableAccountChannels = emptyList()
@@ -791,12 +793,31 @@ private fun AccountSwitcherSheet(
     onLogOut: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    val switchableChannels = accountChannels.takeIf { it.size > 1 }.orEmpty()
+    val switchableChannels = accountChannels
     val resolvedActiveDataSyncId =
         activeDataSyncId.takeIf { it.isNotBlank() }
             ?: switchableChannels.firstOrNull { it.isSelected }?.dataSyncId
 
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+    val sheetState = rememberModalBottomSheetState()
+    val sheetScope = rememberCoroutineScope()
+    var dismissing by remember { mutableStateOf(false) }
+    fun dismissThen(action: () -> Unit) {
+        if (dismissing) return
+        dismissing = true
+        sheetScope.launch {
+            try {
+                sheetState.hide()
+                if (!sheetState.isVisible) {
+                    onDismiss()
+                    action()
+                }
+            } finally {
+                dismissing = false
+            }
+        }
+    }
+
+    ModalBottomSheet(sheetState = sheetState, onDismissRequest = onDismiss) {
         Text(
             text = stringResource(R.string.saved_accounts),
             style = MaterialTheme.typography.headlineSmall,
@@ -835,7 +856,7 @@ private fun AccountSwitcherSheet(
                         selected = isActive,
                         onClick = {
                             if (!isActive) {
-                                onSwitchAccountChannel(channel)
+                                dismissThen { onSwitchAccountChannel(channel) }
                             }
                         },
                         modifier = Modifier.fillMaxWidth(),
@@ -926,7 +947,7 @@ private fun AccountSwitcherSheet(
                         selected = isActive,
                         onClick = {
                             if (!isActive) {
-                                onSwitchAccount(account)
+                                dismissThen { onSwitchAccount(account) }
                             }
                         },
                         modifier = Modifier.fillMaxWidth(),
@@ -1019,7 +1040,7 @@ private fun AccountSwitcherSheet(
                     }
 
                     OutlinedButton(
-                        onClick = onAddAnotherAccount,
+                        onClick = { dismissThen(onAddAnotherAccount) },
                         modifier = Modifier.fillMaxWidth(),
                         shapes = ButtonDefaults.shapes(),
                     ) {
@@ -1033,7 +1054,7 @@ private fun AccountSwitcherSheet(
 
                     if (isLoggedIn) {
                         TextButton(
-                            onClick = onLogOut,
+                            onClick = { dismissThen(onLogOut) },
                             modifier = Modifier.fillMaxWidth(),
                             colors =
                                 ButtonDefaults.textButtonColors(

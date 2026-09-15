@@ -4,6 +4,13 @@
     <string name="songs">Songs</string>
     <string name="artists">Artists</string>
     <string name="albums">Albums</string>
+    <string name="podcast">Podcast</string>
+    <string name="episodes">Episodes</string>
+    <string name="podcast_has_no_episodes">This podcast has no available episodes.</string>
+    <plurals name="n_episode">
+        <item quantity="one">%d episode</item>
+        <item quantity="other">%d episodes</item>
+    </plurals>
     <string name="playlists">Playlists</string>
     <plurals name="n_selected">
         <item quantity="other">%d selected</item>
@@ -159,6 +166,8 @@
     <string name="action_download">Download</string>
     <string name="downloading">Downloading</string>
     <string name="remove_download">Remove download</string>
+    <string name="remove_download_confirm">Are you sure you want to remove this downloaded item? This action cannot be undone.</string>
+    <string name="remove_download_section_confirm">Are you sure you want to remove all downloads in this section? This action cannot be undone.</string>
     <string name="download_progress_percent">%1$d%%</string>
     <string name="import_playlist">Import playlist</string>
     <string name="import_failed">Import failed</string>
@@ -180,7 +189,6 @@
     <string name="delete">Delete</string>
     <string name="hide_playlist">Hide playlist</string>
     <string name="unhide_playlist">Unhide playlist</string>
-    <string name="show_hidden_playlists">Show hidden</string>
     <string name="hide_playlist_confirm">Hide \u0022%1$s\u0022 from library?</string>
     <string name="together_participants">Participants</string>
     <string name="together_connected_count">%1$d connected</string>
@@ -212,7 +220,6 @@
     <string name="tempo_and_pitch">Tempo and Pitch</string>
     <string name="tempo">Tempo</string>
     <string name="pitch">Pitch</string>
-    <string name="set_tempo_and_pitch_manually">Set tempo and pitch manually</string>
     <string name="pitch_mode_semitones_short">st</string>
     <string name="pitch_mode_multiplier_short">x</string>
     <string name="sort_by_create_date">Date added</string>
@@ -300,10 +307,10 @@
         <item quantity="one">1 minute</item>
         <item quantity="other">%d minutes</item>
     </plurals>
-    <string name="error_no_stream">No stream available</string>
+    <string name="error_no_stream" translatable="false">No stream available</string>
     <string name="error_no_internet">No network connection</string>
-    <string name="error_timeout">Timeout</string>
-    <string name="error_malformed_stream">Source error</string>
+    <string name="error_timeout" translatable="false">Timeout</string>
+    <string name="error_malformed_stream" translatable="false">Source error</string>
     <string name="error_unknown">Unknown error</string>
     <string name="action_like">Like</string>
     <string name="action_remove_like">Remove like</string>
@@ -338,6 +345,8 @@
     <string name="app_icon_change_failed">Couldn\'t change the app icon</string>
     <string name="theme">Theme</string>
     <string name="enable_dynamic_theme">Enable dynamic theme</string>
+    <string name="wallpaper_permission">Wallpaper color permission</string>
+    <string name="wallpaper_permission_desc">Grant storage permission to extract colors from your wallpaper on older devices</string>
     <string name="random_theme_on_startup">Random theme on startup</string>
     <string name="random_theme_on_startup_desc">Apply a random color palette every time the app starts</string>
     <string name="font_preference">Font</string>
@@ -448,8 +457,8 @@
     <string name="brightness">Brightness</string>
     <string name="custom_value">Custom value</string>
     <string name="archivetune_canvas">SCSTYM Canvas</string>
-    <string name="archivetune_canvas_desc">Animate album artwork while playing (Powered by BetterLyrics)</string>
-    <string name="player_background_style_v8_v9_desc">Unavailable with V8 and V9 player styles</string>
+    <string name="archivetune_canvas_desc">Animate album artwork while playing</string>
+    <string name="player_background_style_v8_v9_desc">Unavailable with V8, V9, and V10 player styles</string>
     <string name="show_button1_description">Toggle visibility of button 1 in Discord Rich Presence</string>
     <string name="show_button2_description">Toggle visibility of button 2 in Discord Rich Presence</string>
     <string name="discord_activity_type">Activity type</string>
@@ -488,16 +497,20 @@
     <string name="action_logout">Log out</string>
     <string name="action_login">Log in</string>
     <string name="login">Login</string>
-    <string name="playback_login_po_token">Login PO Token</string>
     <string name="not_logged_in">Not logged in</string>
-    <string name="playback_confirmation_required">Playback confirmation required</string>
-    <string name="playback_requires_youtube_music_confirmation">Confirm playback in YouTube Music, then return to SCSTYM.</string>
-    <string name="playback_login_refresh_required">Refresh YouTube Music login</string>
-    <string name="playback_requires_youtube_music_login_refresh">Refresh your YouTube Music login, then return to SCSTYM.</string>
-    <string name="playback_error_code">Code</string>
-    <string name="playback_error_http">HTTP</string>
-    <string name="playback_error_message">Message</string>
-    <string name="playback_error_cause">Cause</string>
+    <string name="playback_confirmation_required" translatable="false">Playback confirmation required</string>
+    <string name="playback_requires_youtube_music_confirmation" translatable="false">Confirm playback in YouTube Music, then return to SCSTYM.</string>
+    <string name="playback_login_refresh_required" translatable="false">Refresh YouTube Music login</string>
+    <string name="playback_requires_youtube_music_login_refresh" translatable="false">Refresh your YouTube Music login, then return to SCSTYM.</string>
+    <string name="playback_error_unknown" translatable="false">Unknown error</string>
+    <string name="playback_error_no_internet" translatable="false">No network connection</string>
+    <string name="playback_error_details" translatable="false">Details</string>
+    <string name="playback_error_reporting_hint">Before reporting this issue in the support server or group, update to the latest nightly or artifact build and try again.</string>
+    <string name="playback_error_app_version" translatable="false">App version: %1$s (%2$d)</string>
+    <string name="playback_error_code" translatable="false">Code</string>
+    <string name="playback_error_http" translatable="false">HTTP</string>
+    <string name="playback_error_message" translatable="false">Message</string>
+    <string name="playback_error_cause" translatable="false">Cause</string>
     <string name="content_language">Default content language</string>
     <string name="content_country">Default content country</string>
     <string name="system_default">System default</string>
@@ -521,12 +534,6 @@
     <string name="proxy_connection_success">Proxy connection successful!</string>
     <string name="proxy_connection_failed">Proxy connection failed: %s</string>
     <string name="proxy_connection_invalid_configuration">Invalid proxy host or port</string>
-    <string name="ip_rotation">IP Rotation</string>
-    <string name="ip_rotation_desc">Rotate the current IP when playback or content issues occur.</string>
-    <string name="ip_rotation_active_proxies">%d active proxies</string>
-    <string name="ip_rotation_loading">Loading proxy list</string>
-    <string name="ip_rotation_refreshing">Refreshing IP</string>
-    <string name="ip_rotation_refresh">Refresh IP</string>
     <string name="stream_bypass_proxy">Bypass proxy for streams</string>
     <string name="stream_bypass_proxy_desc">Use your direct IP for stream playback to avoid IP mismatch</string>
     <string name="enable_betterlyrics">Enable BetterLyrics</string>
@@ -536,13 +543,35 @@
     <string name="enable_simpmusic_lyrics">Enable SimpMusic lyrics</string>
     <string name="enable_megalobiz_lyrics">Enable Megalobiz lyrics</string>
     <string name="enable_paxsenix_lyrics">Enable Paxsenix lyrics</string>
+    <string name="paxsenix_api_key">Paxsenix API key</string>
+    <string name="paxsenix_api_key_configured">Configured</string>
+    <string name="paxsenix_api_key_missing">Required for authenticated Paxsenix requests</string>
+    <string name="paxsenix_apple_music">Paxsenix: Apple Music</string>
+    <string name="paxsenix_spotify">Paxsenix: Spotify</string>
+    <string name="paxsenix_musixmatch">Paxsenix: Musixmatch</string>
     <string name="player_and_audio">Player and audio</string>
     <string name="audio_quality">Audio quality</string>
     <string name="audio_quality_auto">Auto</string>
     <string name="audio_quality_high">High</string>
     <string name="audio_quality_low">Low</string>
     <string name="low_data_mode_title">Low Data Mode</string>
-    <string name="low_data_mode_description">Reduces mobile data usage by using low-quality streams and disabling playback cache, canvas, and background lyrics preloading on metered networks</string>
+    <string name="low_data_mode_description">Reduces mobile data usage by using low-quality streams and disabling playback cache and canvas on metered networks</string>
+    <string name="preload_next_song_title">Preload Mode</string>
+    <string name="preload_next_song_warning">Uses additional data, battery, and processing in the background.</string>
+    <string name="sponsor_block_group">Sponsor Block</string>
+    <string name="sponsor_block_use">Use SponsorBlock</string>
+    <string name="sponsor_block_categories">SponsorBlock</string>
+    <string name="sponsor_block_categories_desc">Select SponsorBlock filtering</string>
+    <string name="sponsor_block_api_url">SponsorBlock API URL</string>
+    <string name="sponsor_block_music_off_topic">Non-music and off-topic portions</string>
+    <string name="sponsor_block_sponsors">Sponsors</string>
+    <string name="sponsor_block_intro">Intro</string>
+    <string name="sponsor_block_outro">Outro</string>
+    <string name="sponsor_block_self_promotions">Self promos</string>
+    <string name="sponsor_block_previews">Previews</string>
+    <string name="sponsor_block_fillers">Fillers</string>
+    <string name="sponsor_block_subscription_reminders">Subscription reminders</string>
+    <string name="sponsor_block_hooks">Hook/Greetings</string>
     <string name="queue">Queue</string>
     <string name="persistent_queue">Persistent queue</string>
     <string name="persistent_queue_desc">Restore your last queue when the app starts</string>
@@ -568,7 +597,7 @@
     <string name="external_downloader">External Downloader</string>
     <string name="external_downloader_desc">Download songs through an external app by package name</string>
     <string name="external_downloader_package">Downloader App Package</string>
-    <string name="external_downloader_package_desc">Package name of the external downloader app (e.g. com.deniscerri.ytdl)</string>
+    <string name="external_downloader_package_desc">Package name or app name of the external downloader (e.g. com.deniscerri.ytdl or YTDLnis)</string>
     <string name="open_with_downloader">Open with Downloader</string>
     <string name="external_downloader_not_installed">External downloader app is not installed</string>
     <string name="external_downloader_not_configured">No external downloader configured. Set one in Settings â†’ Player.</string>
@@ -658,6 +687,11 @@
     <string name="pause_listen_history">Pause listen history</string>
     <string name="clear_listen_history">Clear listen history</string>
     <string name="clear_listen_history_confirm">Are you sure you want to clear all listen history?</string>
+    <string name="reset_listening_stats">Reset listening stats</string>
+    <string name="reset_listening_stats_confirm">Reset all listening stats on this device? This deletes listening history, play counts, and listening time. Your library, playlists, and downloads will be kept. This cannot be undone.</string>
+    <string name="reset_listening_stats_progress">Resetting listening stats…</string>
+    <string name="reset_listening_stats_success">Listening stats reset</string>
+    <string name="reset_listening_stats_error">Could not reset listening stats. Try again.</string>
     <string name="search_history">Search history</string>
     <string name="pause_search_history">Pause search history</string>
     <string name="clear_search_history">Clear search history</string>
@@ -667,8 +701,6 @@
     <string name="disable_screenshot_desc">When this option is on, screenshots and the app\'s view in Recents are disabled.</string>
     <string name="enable_lrclib">Enable LrcLib lyrics provider</string>
     <string name="enable_kugou">Enable KuGou lyrics provider</string>
-    <string name="preload_queue_lyrics">Preload queue lyrics</string>
-    <string name="queue_lyrics_preload_count">Number of songs to preload</string>
     <string name="display">Display</string>
     <string name="romanization">Romanization</string>
     <string name="hide_explicit">Hide explicit content</string>
@@ -772,14 +804,6 @@
     <string name="discord_presence_do_not_disturb">Do Not Disturb</string>
     <string name="discord_presence_idle">Idle</string>
     <string name="discord_presence_streaming">Streaming</string>
-    <string name="discord_platform_desktop">Desktop</string>
-    <string name="discord_platform_xbox">Xbox</string>
-    <string name="discord_platform_samsung">Samsung</string>
-    <string name="discord_platform_ios">iOS</string>
-    <string name="discord_platform_android">Android</string>
-    <string name="discord_platform_embedded">Embedded</string>
-    <string name="discord_platform_ps4">PS4</string>
-    <string name="discord_platform_ps5">PS5</string>
     <string name="discord_activity_type_playing_label">Playing</string>
     <string name="discord_activity_type_streaming_label">Streaming</string>
     <string name="discord_activity_type_listening_label">Listening</string>
@@ -788,7 +812,6 @@
     <string name="discord_image_album_artwork">Album artwork</string>
     <string name="discord_image_artist_artwork">Artist artwork</string>
     <string name="activity_status">Activity Status</string>
-    <string name="platform_status">Platform</string>
     <string name="translator_options">Translator Options</string>
     <string name="enable_translator">Enable Translator</string>
     <string name="enable_translator_desc">Translate selected fields before sending to Discord RPC</string>
@@ -876,8 +899,7 @@
     <string name="about">About</string>
     <string name="new_version_available">New version available</string>
     <string name="updates">Updates</string>
-    <string name="updates_subtitle_stable">Stable releases and release notes</string>
-    <string name="updates_subtitle_canary">Canary releases and recent development commits</string>
+    <string name="updates_subtitle_artifact">Artifact builds from GitHub Actions workflow</string>
     <string name="current_version">Current Version</string>
     <string name="latest_version_format">Latest: %s</string>
     <string name="updates_status_checking">Checking for the latest release</string>
@@ -886,19 +908,18 @@
     <string name="enable_update_notification_channel_desc">Get notified when a new release is available on the selected channel</string>
     <string name="update_channel">Update Channel</string>
     <string name="update_channel_desc">Choose between tested releases and development snapshots.</string>
-    <string name="channel_stable">Stable</string>
-    <string name="channel_canary">Canary</string>
+    <string name="channel_artifact">Artifact</string>
     <string name="recent_commits">Recent Commits</string>
-    <string name="updates_canary_hosting_description">Canary releases are published automatically from the latest development branch.</string>
+    <string name="updates_artifact_hosting_description">Artifact builds are fetched directly from GitHub Actions workflow runs.</string>
     <string name="updates_channel_warning_intro">SCSTYM provides two download channels for builds:</string>
     <string name="updates_channel_warning_stable_title">Stable builds</string>
     <string name="updates_channel_warning_stable_source">Distributed via official GitHub Releases.</string>
     <string name="updates_channel_warning_stable_desc">These versions are tested and recommended for most users.</string>
-    <string name="updates_channel_warning_canary_title">Canary releases</string>
-    <string name="updates_channel_warning_canary_risk">Canary releases may include experimental features, unfinished changes, or temporary regressions.</string>
-    <string name="updates_channel_warning_canary_unstable">Canary releases are provided for testing and early access only.\nStability, compatibility, and functionality are not guaranteed.</string>
-    <string name="updates_channel_warning_canary_acknowledgement">Note: downloading directly from GitHub bypasses any additional screening performed by the store you might have originally installed the app from.\nBy continuing, you acknowledge that Canary releases may be unstable and use them at your own risk.</string>
-    <string name="updates_canary_channel_confirmation">Switch to the Canary channel to receive development releases.\n\nCanary releases are published automatically from the latest development branch.\nNote: downloading directly from GitHub bypasses any additional screening performed by the store you might have originally installed the app from.</string>
+    <string name="updates_channel_warning_artifact_title">Artifact builds</string>
+    <string name="updates_channel_warning_artifact_risk">Artifact builds may include experimental features, unfinished changes, or temporary regressions.</string>
+    <string name="updates_channel_warning_artifact_unstable">Artifact builds are provided for testing and early access only.\nStability, compatibility, and functionality are not guaranteed.</string>
+    <string name="updates_channel_warning_artifact_acknowledgement">Note: downloading directly from GitHub bypasses any additional screening performed by the store you might have originally installed the app from.\nBy continuing, you acknowledge that Artifact builds may be unstable and use them at your own risk.</string>
+    <string name="updates_artifact_channel_confirmation">Switch to the Artifact channel to receive development builds.\n\nArtifact builds are fetched directly from GitHub Actions workflow runs.\nNote: downloading directly from GitHub bypasses any additional screening performed by the store you might have originally installed the app from.</string>
     <string name="updates_loading_commits">Loading recent commits</string>
     <string name="updates_recent_commits_count">%1$d recent commits</string>
     <string name="updates_no_commits">No recent commits found</string>
@@ -934,9 +955,20 @@
     <string name="next">Next</string>
     <string name="allow">Allow</string>
     <string name="onboarding_welcome_title">Welcome to SCSTYM</string>
-    <string name="onboarding_welcome_subtitle">Some Cool Stuff To Your Music. Set up playback, local music, and permissions before you start listening.</string>
+    <string name="onboarding_welcome_subtitle">Set up playback, local music, and update permissions before you start listening.</string>
     <string name="onboarding_permissions_title">Review permissions</string>
     <string name="onboarding_permissions_subtitle">Grant only what you want now. You can continue and allow permissions later.</string>
+    <string name="onboarding_login_title">Sync your listening</string>
+    <string name="onboarding_login_subtitle">Log in to sync your library and history across devices and get more reliable playback.</string>
+    <string name="onboarding_login_optional">Optional. You can log in later from Settings.</string>
+    <string name="onboarding_login_benefits_title">Your account helps ArchiveTune</string>
+    <string name="onboarding_login_library_title">Sync your library</string>
+    <string name="onboarding_login_library_desc">Keep your saved music and playlists available wherever you listen.</string>
+    <string name="onboarding_login_history_title">Keep your history</string>
+    <string name="onboarding_login_history_desc">Continue your listening journey across devices with synced history.</string>
+    <string name="onboarding_login_playback_title">Better playback</string>
+    <string name="onboarding_login_playback_desc">Use your account context for a more dependable playback experience.</string>
+    <string name="onboarding_login_skip">Skip for now</string>
     <string name="onboarding_community_title">Stay connected</string>
     <string name="onboarding_community_subtitle">Follow development, report issues, or support SCSTYM.</string>
     <string name="onboarding_finish">Start listening</string>
@@ -1054,25 +1086,6 @@
     <string name="together_welcome_join_body">Open the shared link, or enter code and tap Join. Your queue and playback will follow the host.</string>
     <string name="together_welcome_permissions_title">Permissions and safety</string>
     <string name="together_welcome_permissions_body">Hosts can decide whether guests can add songs, control playback, or require approval to join.</string>
-    <string name="po_token_generation">PO Token Generation</string>
-    <string name="web_client_po_token">Web Client PO Token</string>
-    <string name="web_client_po_token_desc">Enable PO token generation for web-based player clients</string>
-    <string name="po_token_gvs">PO Token (GVS)</string>
-    <string name="po_token_player">PO Token (Player)</string>
-    <string name="visitor_data">Visitor Data</string>
-    <string name="generated_tokens">Generated Tokens</string>
-    <string name="regenerate">Re-generate</string>
-    <string name="regenerate_token">Regenerate Token</string>
-    <string name="source_url">Source URL</string>
-    <string name="source_url_placeholder">https://youtube.com/account</string>
-    <string name="tokens_generated">Tokens generated successfully</string>
-    <string name="token_generation_failed">Token generation failed</string>
-    <string name="token_copied">Token copied to clipboard</string>
-    <string name="extracting_from_url">Extracting tokens from URL</string>
-    <string name="po_token_account_notice_title">Use the same account</string>
-    <string name="po_token_account_notice_body">Sign in here with the same Google account that you already use for YouTube Music inside SCSTYM before generating a PO token.</string>
-    <string name="po_token_account_notice_same_account">If this WebView uses a different account, the generated token will not work correctly.</string>
-    <string name="po_token_account_notice_mismatch">Use the matching account, finish the sign-in flow, then open youtube.com/account and generate the token from that page.</string>
     <string name="saved_accounts">Saved accounts</string>
     <string name="save_current_account">Save current account</string>
     <string name="no_saved_accounts">No saved accounts yet</string>
@@ -1108,4 +1121,5 @@
     <string name="scheduled_backup_load_failed">Scheduled backup settings could not be loaded</string>
     <string name="scheduled_backup_update_failed">Scheduled backup settings could not be saved</string>
     <string name="gatekeeper_connection_blocked">Connection blocked by SCSTYM Remote. This app could not be verified as an official SCSTYM build. Install an official build from https://github.com/rukamori/SCSTYM or https://t.me/SCSTYMGC.</string>
+    <string name="set_tempo_and_pitch_manually">Set tempo and pitch manually</string>
 </resources>

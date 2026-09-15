@@ -103,6 +103,7 @@ import kotlinx.coroutines.launch
 import moe.rukamori.archivetune.BuildConfig
 import moe.rukamori.archivetune.LocalPlayerAwareWindowInsets
 import moe.rukamori.archivetune.R
+import moe.rukamori.archivetune.channelTitle
 import moe.rukamori.archivetune.constants.EnableUpdateNotificationKey
 import moe.rukamori.archivetune.constants.UpdateChannel
 import moe.rukamori.archivetune.constants.UpdateChannelKey
@@ -155,7 +156,7 @@ fun UpdateScreen(
     var isLoadingCommits by remember { mutableStateOf(true) }
     var latestVersion by remember { mutableStateOf<String?>(null) }
     var isExpanded by rememberSaveable { mutableStateOf(true) }
-    var showCanaryChannelConfirmDialog by rememberSaveable { mutableStateOf(false) }
+    var showArtifactChannelConfirmDialog by rememberSaveable { mutableStateOf(false) }
     var showEnableUpdateNotificationConfirmDialog by rememberSaveable { mutableStateOf(false) }
     var hasNotificationPermission by remember {
         mutableStateOf(
@@ -277,7 +278,7 @@ fun UpdateScreen(
 
         val downloadUrl =
             when (updateChannel) {
-                UpdateChannel.CANARY -> Updater.getLatestCanaryDownloadUrl()
+                UpdateChannel.ARTIFACT -> Updater.getLatestCanaryDownloadUrl()
                 UpdateChannel.STABLE -> Updater.getLatestDownloadUrl()
             }
 
@@ -306,7 +307,7 @@ fun UpdateScreen(
                 coroutineScope.launch {
                     val releaseResult =
                         when (updateChannel) {
-                            UpdateChannel.CANARY -> Updater.getLatestCanaryReleaseInfo(forceRefresh = true)
+                            UpdateChannel.ARTIFACT -> Updater.getLatestArtifactReleaseInfo(forceRefresh = true)
                             UpdateChannel.STABLE -> Updater.getLatestReleaseInfo(forceRefresh = true)
                         }
 
@@ -323,6 +324,9 @@ fun UpdateScreen(
                             if (updateSheetIsSameVersion) {
                                 showUpdateUpToDateDialog = true
                                 onUpToDate()
+                            } else if (updateChannel == UpdateChannel.ARTIFACT) {
+                                val downloadUrl = Updater.getLatestCanaryDownloadUrl()
+                                installUpdate(downloadUrl)
                             } else {
                                 updateSheetState.show(updateSheetContent)
                             }
@@ -377,26 +381,26 @@ fun UpdateScreen(
 
                     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         Text(
-                            text = stringResource(R.string.updates_channel_warning_canary_title),
+                            text = stringResource(R.string.updates_channel_warning_artifact_title),
                             style = MaterialTheme.typography.bodyMedium,
                             fontWeight = FontWeight.SemiBold,
                         )
                         Text(
-                            text = stringResource(R.string.updates_canary_hosting_description),
+                            text = stringResource(R.string.updates_artifact_hosting_description),
                             style = MaterialTheme.typography.bodySmall,
                         )
                         Text(
-                            text = stringResource(R.string.updates_channel_warning_canary_risk),
+                            text = stringResource(R.string.updates_channel_warning_artifact_risk),
                             style = MaterialTheme.typography.bodySmall,
                         )
                     }
 
                     Text(
-                        text = stringResource(R.string.updates_channel_warning_canary_unstable),
+                        text = stringResource(R.string.updates_channel_warning_artifact_unstable),
                         style = MaterialTheme.typography.bodySmall,
                     )
                     Text(
-                        text = stringResource(R.string.updates_channel_warning_canary_acknowledgement),
+                        text = stringResource(R.string.updates_channel_warning_artifact_acknowledgement),
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
@@ -424,28 +428,28 @@ fun UpdateScreen(
         )
     }
 
-    if (showCanaryChannelConfirmDialog) {
+    if (showArtifactChannelConfirmDialog) {
         AlertDialog(
-            onDismissRequest = { showCanaryChannelConfirmDialog = false },
-            title = { Text(stringResource(R.string.channel_canary)) },
+            onDismissRequest = { showArtifactChannelConfirmDialog = false },
+            title = { Text(stringResource(R.string.channel_artifact)) },
             text = {
                 Text(
-                    text = stringResource(R.string.updates_canary_channel_confirmation),
+                    text = stringResource(R.string.updates_artifact_channel_confirmation),
                     style = MaterialTheme.typography.bodyMedium,
                 )
             },
             confirmButton = {
                 TextButton(
                     onClick = {
-                        showCanaryChannelConfirmDialog = false
-                        onUpdateChannelChange(UpdateChannel.CANARY)
+                        showArtifactChannelConfirmDialog = false
+                        onUpdateChannelChange(UpdateChannel.ARTIFACT)
                     },
                 ) {
                     Text(stringResource(android.R.string.ok))
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showCanaryChannelConfirmDialog = false }) {
+                TextButton(onClick = { showArtifactChannelConfirmDialog = false }) {
                     Text(stringResource(android.R.string.cancel))
                 }
             },
@@ -460,7 +464,7 @@ fun UpdateScreen(
 
         val versionResult =
             when (updateChannel) {
-                UpdateChannel.CANARY -> Updater.getLatestCanaryVersionName()
+                UpdateChannel.ARTIFACT -> Updater.getLatestCanaryVersionName()
                 else -> Updater.getLatestVersionName()
             }
         versionResult.onSuccess {
@@ -486,8 +490,8 @@ fun UpdateScreen(
     )
     val topBarSubtitle =
         when (updateChannel) {
-            UpdateChannel.CANARY -> stringResource(R.string.updates_subtitle_canary)
-            UpdateChannel.STABLE -> stringResource(R.string.updates_subtitle_stable)
+            UpdateChannel.ARTIFACT -> stringResource(R.string.updates_subtitle_artifact)
+            UpdateChannel.STABLE -> channelTitle
         }
 
     Scaffold(
@@ -575,9 +579,9 @@ fun UpdateScreen(
                         }
                     },
                     onStableSelected = { onUpdateChannelChange(UpdateChannel.STABLE) },
-                    onCanarySelected = {
-                        if (updateChannel != UpdateChannel.CANARY) {
-                            showCanaryChannelConfirmDialog = true
+                    onArtifactSelected = {
+                        if (updateChannel != UpdateChannel.ARTIFACT) {
+                            showArtifactChannelConfirmDialog = true
                         }
                     },
                     modifier =
@@ -645,10 +649,10 @@ fun UpdateScreen(
         val downloadTitle =
             buildString {
                 when (updateChannel) {
-                    UpdateChannel.CANARY -> {
+                    UpdateChannel.ARTIFACT -> {
                         append(context.getString(R.string.app_name))
                         append(' ')
-                        append(context.getString(R.string.channel_canary))
+                        append(context.getString(R.string.channel_artifact))
                     }
 
                     UpdateChannel.STABLE -> {
@@ -807,7 +811,7 @@ private fun UpdateDashboard(
     onOpenChangelog: () -> Unit,
     onUpdateNotificationChange: (Boolean) -> Unit,
     onStableSelected: () -> Unit,
-    onCanarySelected: () -> Unit,
+    onArtifactSelected: () -> Unit,
 ) {
     if (useWideLayout) {
         Row(
@@ -829,7 +833,7 @@ private fun UpdateDashboard(
                 updateChannel = updateChannel,
                 onUpdateNotificationChange = onUpdateNotificationChange,
                 onStableSelected = onStableSelected,
-                onCanarySelected = onCanarySelected,
+                onArtifactSelected = onArtifactSelected,
                 modifier = Modifier.weight(1f),
             )
         }
@@ -851,7 +855,7 @@ private fun UpdateDashboard(
                 updateChannel = updateChannel,
                 onUpdateNotificationChange = onUpdateNotificationChange,
                 onStableSelected = onStableSelected,
-                onCanarySelected = onCanarySelected,
+                onArtifactSelected = onArtifactSelected,
             )
         }
     }
@@ -869,8 +873,8 @@ private fun UpdateStatusPanel(
 ) {
     val channelLabel =
         when (updateChannel) {
-            UpdateChannel.STABLE -> stringResource(R.string.channel_stable)
-            UpdateChannel.CANARY -> stringResource(R.string.channel_canary)
+            UpdateChannel.STABLE -> channelTitle
+            UpdateChannel.ARTIFACT -> stringResource(R.string.channel_artifact)
         }
     val supportingText =
         when {
@@ -891,13 +895,13 @@ private fun UpdateStatusPanel(
             MaterialTheme.colorScheme.onSecondaryContainer
         }
     val channelContainerColor =
-        if (updateChannel == UpdateChannel.CANARY) {
+        if (updateChannel == UpdateChannel.ARTIFACT) {
             MaterialTheme.colorScheme.tertiaryContainer
         } else {
             MaterialTheme.colorScheme.secondaryContainer
         }
     val channelContentColor =
-        if (updateChannel == UpdateChannel.CANARY) {
+        if (updateChannel == UpdateChannel.ARTIFACT) {
             MaterialTheme.colorScheme.onTertiaryContainer
         } else {
             MaterialTheme.colorScheme.onSecondaryContainer
@@ -997,21 +1001,23 @@ private fun UpdateStatusPanel(
                     Text(text = stringResource(R.string.check_for_update))
                 }
 
-                TextButton(
-                    onClick = onOpenChangelog,
-                    modifier =
-                        Modifier
-                            .fillMaxWidth()
-                            .heightIn(min = 48.dp),
-                    shapes = ButtonDefaults.shapes(),
-                ) {
-                    Icon(
-                        painter = painterResource(R.drawable.update),
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp),
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(text = stringResource(R.string.view_changelog))
+                if (updateChannel == UpdateChannel.STABLE) {
+                    TextButton(
+                        onClick = onOpenChangelog,
+                        modifier =
+                            Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 48.dp),
+                        shapes = ButtonDefaults.shapes(),
+                    ) {
+                        Icon(
+                            painter = painterResource(R.drawable.update),
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(text = stringResource(R.string.view_changelog))
+                    }
                 }
             }
         }
@@ -1025,7 +1031,7 @@ private fun UpdatePreferencesPanel(
     modifier: Modifier = Modifier,
     onUpdateNotificationChange: (Boolean) -> Unit,
     onStableSelected: () -> Unit,
-    onCanarySelected: () -> Unit,
+    onArtifactSelected: () -> Unit,
 ) {
     Column(
         modifier = modifier.fillMaxWidth(),
@@ -1109,15 +1115,15 @@ private fun UpdatePreferencesPanel(
                         shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
                         icon = {},
                     ) {
-                        Text(text = stringResource(R.string.channel_stable))
+                        Text(text = channelTitle)
                     }
                     SegmentedButton(
-                        selected = updateChannel == UpdateChannel.CANARY,
-                        onClick = onCanarySelected,
+                        selected = updateChannel == UpdateChannel.ARTIFACT,
+                        onClick = onArtifactSelected,
                         shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
                         icon = {},
                     ) {
-                        Text(text = stringResource(R.string.channel_canary))
+                        Text(text = stringResource(R.string.channel_artifact))
                     }
                 }
             }

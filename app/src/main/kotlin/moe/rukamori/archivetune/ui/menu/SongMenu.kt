@@ -71,6 +71,7 @@ import androidx.media3.exoplayer.offline.DownloadRequest
 import androidx.media3.exoplayer.offline.DownloadService
 import androidx.navigation.NavController
 import coil3.compose.AsyncImage
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -103,14 +104,17 @@ import moe.rukamori.archivetune.ui.component.TextFieldDialog
 import moe.rukamori.archivetune.ui.utils.ShowMediaInfo
 import moe.rukamori.archivetune.ui.utils.YtimgResizePolicy
 import moe.rukamori.archivetune.ui.utils.resize
+import moe.rukamori.archivetune.utils.ExternalDownloaderLaunchResult
 import moe.rukamori.archivetune.utils.SpeedDialPin
 import moe.rukamori.archivetune.utils.SpeedDialPinType
+import moe.rukamori.archivetune.utils.openExternalDownloader
 import moe.rukamori.archivetune.utils.parseSpeedDialPins
 import moe.rukamori.archivetune.utils.rememberPreference
 import moe.rukamori.archivetune.utils.serializeSpeedDialPins
 import moe.rukamori.archivetune.utils.shareLocalAudio
 import moe.rukamori.archivetune.utils.toggleSpeedDialPin
 import moe.rukamori.archivetune.viewmodels.CachePlaylistViewModel
+import timber.log.Timber
 
 @Composable
 fun SongMenu(
@@ -251,7 +255,7 @@ fun SongMenu(
 
                 coroutineScope.launch {
                     database.query {
-                        update(song.song.copy(title = newTitle))
+                        update(song.song.copy(title = newTitle, titleOverride = true))
                         val artist = song.artists.firstOrNull()
                         if (artist != null) {
                             update(artist.copy(name = newArtist))
@@ -384,11 +388,34 @@ fun SongMenu(
             trailingContent = {
                 IconButton(
                     onClick = {
-                        val s = song.song.toggleLike()
-                        database.query {
-                            update(s)
+                        coroutineScope.launch(Dispatchers.IO) {
+                            try {
+                                val requestedSong =
+                                    database.withTransaction {
+                                        val currentSong =
+                                            getSongById(song.id)
+                                                ?: run {
+                                                    insert(song.toMediaMetadata())
+                                                    getSongById(song.id)
+                                                }
+                                                ?: return@withTransaction null
+                                        currentSong.song.toggleLike()
+                                    } ?: return@launch
+                                syncUtils.likeSong(requestedSong).onFailure { error ->
+                                    Timber.w(error, "Failed to update liked song ${song.id}")
+                                    withContext(Dispatchers.Main) {
+                                        Toast.makeText(context, R.string.error_unknown, Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            } catch (error: CancellationException) {
+                                throw error
+                            } catch (error: Exception) {
+                                Timber.e(error, "Failed to prepare liked song ${song.id}")
+                                withContext(Dispatchers.Main) {
+                                    Toast.makeText(context, R.string.error_unknown, Toast.LENGTH_SHORT).show()
+                                }
+                            }
                         }
-                        syncUtils.likeSong(s)
                     },
                 ) {
                     Icon(
@@ -900,30 +927,24 @@ fun SongMenu(
                                         Modifier.clickable {
                                             onDismiss()
                                             val url = "https://music.youtube.com/watch?v=${song.id}"
-                                            if (externalDownloaderPackage.isBlank()) {
-                                                Toast
-                                                    .makeText(
-                                                        context,
-                                                        context.getString(R.string.external_downloader_not_configured),
-                                                        Toast.LENGTH_LONG,
-                                                    ).show()
-                                                return@clickable
-                                            }
-                                            val intent =
-                                                android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
-                                                    setPackage(externalDownloaderPackage)
-                                                    data = android.net.Uri.parse(url)
-                                                    addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                                            when (context.openExternalDownloader(externalDownloaderPackage, url)) {
+                                                ExternalDownloaderLaunchResult.STARTED -> Unit
+                                                ExternalDownloaderLaunchResult.NOT_CONFIGURED -> {
+                                                    Toast
+                                                        .makeText(
+                                                            context,
+                                                            context.getString(R.string.external_downloader_not_configured),
+                                                            Toast.LENGTH_LONG,
+                                                        ).show()
                                                 }
-                                            try {
-                                                context.startActivity(intent)
-                                            } catch (e: android.content.ActivityNotFoundException) {
-                                                Toast
-                                                    .makeText(
-                                                        context,
-                                                        context.getString(R.string.external_downloader_not_installed),
-                                                        Toast.LENGTH_SHORT,
-                                                    ).show()
+                                                ExternalDownloaderLaunchResult.NOT_INSTALLED -> {
+                                                    Toast
+                                                        .makeText(
+                                                            context,
+                                                            context.getString(R.string.external_downloader_not_installed),
+                                                            Toast.LENGTH_SHORT,
+                                                        ).show()
+                                                }
                                             }
                                         },
                                     colors = ListItemDefaults.colors(containerColor = Color.Transparent),

@@ -24,6 +24,7 @@ import coil3.request.allowHardware
 import coil3.request.crossfade
 import dagger.hilt.android.HiltAndroidApp
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -33,8 +34,9 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import moe.rukamori.archivetune.canvas.ArchiveTuneCanvas
+import moe.rukamori.archivetune.canvas.StartCanvasPolicyUseCase
 import moe.rukamori.archivetune.constants.*
+import moe.rukamori.archivetune.downloads.DownloadedArtworkRepository
 import moe.rukamori.archivetune.extensions.*
 import moe.rukamori.archivetune.gatekeeper.GatekeeperResult
 import moe.rukamori.archivetune.gatekeeper.RunGatekeeperCheckUseCase
@@ -42,17 +44,15 @@ import moe.rukamori.archivetune.innertube.YouTube
 import moe.rukamori.archivetune.innertube.models.YouTubeLocale
 import moe.rukamori.archivetune.kugou.KuGou
 import moe.rukamori.archivetune.lastfm.LastFM
-import moe.rukamori.archivetune.morideobfuscator.MoriCipherConfig
-import moe.rukamori.archivetune.morideobfuscator.MoriCipherRuntime
 import moe.rukamori.archivetune.paxsenix.PaxsenixLyrics
+import moe.rukamori.archivetune.playback.stream.YoutubeiStreamRepository
 import moe.rukamori.archivetune.scrobbling.LastFmServiceConfig
 import moe.rukamori.archivetune.storage.StorageFolderKind
 import moe.rukamori.archivetune.storage.StorageLocationRepository
-import moe.rukamori.archivetune.ui.player.CanvasArtworkPlaybackCache
 import moe.rukamori.archivetune.ui.screens.settings.ThemePalettes
 import moe.rukamori.archivetune.ui.theme.ThemeSeedPalette
 import moe.rukamori.archivetune.ui.theme.ThemeSeedPaletteCodec
-import moe.rukamori.archivetune.utils.MoriCipherUpdateScheduler
+import moe.rukamori.archivetune.utils.PlaylistCoverInterceptor
 import moe.rukamori.archivetune.utils.PreferenceStore
 import moe.rukamori.archivetune.utils.ProxyUtils
 import moe.rukamori.archivetune.utils.YTPlayerUtils
@@ -65,7 +65,6 @@ import moe.rukamori.archivetune.utils.reportException
 import moe.rukamori.archivetune.utils.toPlaybackAuthState
 import okhttp3.Dns
 import timber.log.Timber
-import java.io.File
 import java.io.PrintWriter
 import java.io.StringWriter
 import java.net.Proxy
@@ -80,6 +79,18 @@ class App :
     SingletonImageLoader.Factory {
     @Inject
     lateinit var runGatekeeperCheckUseCase: RunGatekeeperCheckUseCase
+
+    @Inject
+    lateinit var downloadedArtworkRepository: DownloadedArtworkRepository
+
+    @Inject
+    lateinit var playlistCoverInterceptor: PlaylistCoverInterceptor
+
+    @Inject
+    lateinit var youtubeiStreamRepository: YoutubeiStreamRepository
+
+    @Inject
+    lateinit var startCanvasPolicy: StartCanvasPolicyUseCase
 
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
@@ -108,6 +119,7 @@ class App :
         }
         BotGuardTokenGenerator.initialize(this)
         PreferenceStore.start(this)
+        LeakCanaryController.initialize(this)
         Timber.plant(Timber.DebugTree())
         try {
             Timber.plant(
@@ -138,19 +150,11 @@ class App :
 
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
-        // WebView cleanup happens automatically on process death
+        youtubeiStreamRepository.trimMemory(level)
     }
 
     private fun initializeCriticalSync() {
-        MoriCipherRuntime.initialize(
-            MoriCipherConfig(
-                cacheDirectory = File(noBackupFilesDir, "mori_cipher"),
-                proxyProvider = { YouTube.streamProxy },
-            ),
-        )
-        MoriCipherUpdateScheduler.schedule(this)
-        CanvasArtworkPlaybackCache.init(this)
-        ArchiveTuneCanvas.initialize(BuildConfig.CANVAS_BEARER_TOKEN)
+        startCanvasPolicy.start(applicationScope)
         PaxsenixLyrics.setUserAgent("SCSTYM", BuildConfig.VERSION_NAME)
 
         val locale = Locale.getDefault()
@@ -174,10 +178,15 @@ class App :
 
     private fun initializeDeferredAsync() {
         applicationScope.launch(Dispatchers.IO) {
-            MoriCipherRuntime
-                .refresh(force = false)
-                .onFailure { Timber.w(it, "Mori cipher background initialization failed") }
+            try {
+                youtubeiStreamRepository.preWarm()
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (throwable: Throwable) {
+                Timber.tag("YoutubeiResolver").w(throwable, "youtubei.js runtime prewarm failed")
+            }
         }
+
         applicationScope.launch(Dispatchers.IO) {
             try {
                 val prefs = dataStore.data.first()
@@ -189,6 +198,7 @@ class App :
                     YouTube.locale = YouTube.locale.copy(hl = lang)
                 }
 
+                PaxsenixLyrics.setApiKey(prefs[PaxsenixApiKeyKey].orEmpty())
                 LastFmServiceConfig.fromPreferences(prefs).apply(prefs[LastFMSessionKey])
 
                 ProxyUtils.applyYouTubeProxy(
@@ -200,14 +210,6 @@ class App :
                     password = prefs[ProxyPasswordKey],
                 )
                 YouTube.streamBypassProxy = YouTube.proxy != null && prefs[StreamBypassProxyKey] == true
-
-                if (prefs[IpRotationEnabledKey] == true) {
-                    try {
-                        YouTube.enableIpRotation()
-                    } catch (e: Exception) {
-                        reportException(e)
-                    }
-                }
 
                 if (prefs[UseLoginForBrowse] != false) {
                     YouTube.useLoginForBrowse = true
@@ -277,10 +279,8 @@ class App :
                     YouTube.authState = authState
                     if (previousFingerprint != authState.fingerprint) {
                         YTPlayerUtils.clearPlaybackAuthCaches()
-                        val sessionId = authState.sessionId
-                        if (!sessionId.isNullOrBlank()) {
-                            BotGuardTokenGenerator.preWarm(sessionId)
-                        }
+                        youtubeiStreamRepository.invalidateSessions()
+                        YTPlayerUtils.preWarmYoutubeiPoTokens(authState)
                     }
                 }
         }
@@ -364,6 +364,10 @@ class App :
             .allowHardware(Build.VERSION.SDK_INT >= Build.VERSION_CODES.P)
             .diskCache(diskCache)
             .diskCachePolicy(imageCacheConfig.policy)
+            .components {
+                add(playlistCoverInterceptor)
+                add(downloadedArtworkRepository.coilMapper())
+            }
             .build()
     }
 

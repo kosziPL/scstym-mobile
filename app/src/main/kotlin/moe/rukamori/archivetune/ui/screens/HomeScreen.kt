@@ -7,6 +7,7 @@
 
 package moe.rukamori.archivetune.ui.screens
 
+import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.annotation.DrawableRes
 import androidx.annotation.StringRes
@@ -50,7 +51,6 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavController
 import androidx.navigation.compose.currentBackStackEntryAsState
@@ -60,10 +60,13 @@ import moe.rukamori.archivetune.LocalPlayerConnection
 import moe.rukamori.archivetune.R
 import moe.rukamori.archivetune.constants.QuickPicks
 import moe.rukamori.archivetune.home.HomeAction
+import moe.rukamori.archivetune.home.HomeEvent
 import moe.rukamori.archivetune.home.HomeScreenState
 import moe.rukamori.archivetune.home.HomeUiState
 import moe.rukamori.archivetune.models.MediaMetadata
+import moe.rukamori.archivetune.extensions.toMediaItem
 import moe.rukamori.archivetune.playback.PlayerConnection
+import moe.rukamori.archivetune.playback.queues.ListQueue
 import moe.rukamori.archivetune.ui.component.ExpressivePullToRefreshBox
 import moe.rukamori.archivetune.ui.component.LocalMenuState
 import moe.rukamori.archivetune.ui.component.MenuState
@@ -77,8 +80,8 @@ private val HomeSectionSpacing = 18.dp
 @Composable
 fun HomeScreen(
     navController: NavController,
+    viewModel: HomeViewModel,
     headerScrollConnection: NestedScrollConnection? = null,
-    viewModel: HomeViewModel = hiltViewModel(),
 ) {
     val playerConnection = LocalPlayerConnection.current ?: return
     val menuState = LocalMenuState.current
@@ -87,6 +90,23 @@ fun HomeScreen(
     val screenState by viewModel.screenState.collectAsStateWithLifecycle()
     val isPlaying by playerConnection.isPlaying.collectAsStateWithLifecycle()
     val mediaMetadata by playerConnection.mediaMetadata.collectAsStateWithLifecycle()
+
+    LaunchedEffect(viewModel, playerConnection, navController) {
+        viewModel.events.collect { event ->
+            when (event) {
+                is HomeEvent.OpenPodcast -> navController.navigate("podcast/${Uri.encode(event.browseId)}")
+                is HomeEvent.PlayPodcastEpisode -> {
+                    playerConnection.playQueue(
+                        ListQueue(
+                            title = event.request.title,
+                            items = event.request.items.map { metadata -> metadata.toMediaItem() },
+                            startIndex = event.request.startIndex,
+                        ),
+                    )
+                }
+            }
+        }
+    }
 
     val lazyListState = rememberLazyListState()
     val forgottenFavoritesGridState = rememberLazyGridState()
@@ -344,27 +364,30 @@ private fun HomeContent(
                             contentType = "section_header",
                         ) {
                             HomeSectionHeader(
-                                title = remoteQuickPicks.title,
+                                title = stringResource(R.string.quick_picks),
                                 modifier = Modifier.animateItem(),
                             )
                         }
                         item(
                             key = "home_remote_quick_picks",
-                            contentType = "media_shelf",
+                            contentType = "quick_picks",
                         ) {
-                            HomePageSectionContent(
+                            RemoteQuickPicksSection(
                                 section = remoteQuickPicks,
                                 mediaMetadata = mediaMetadata,
                                 isPlaying = isPlaying,
+                                displayMode = uiState.quickPicksDisplayMode,
                                 navController = navController,
                                 playerConnection = playerConnection,
                                 menuState = menuState,
                                 haptic = haptic,
-                                scope = scope,
                                 modifier = Modifier.animateItem(),
                             )
                         }
-                    } else if (uiState.quickPicks.isNotEmpty()) {
+                    } else if (
+                        uiState.quickPicksMode == QuickPicks.LAST_LISTEN &&
+                            uiState.quickPicks.isNotEmpty()
+                    ) {
                         item(
                             key = "home_quick_picks_header",
                             contentType = "section_header",
@@ -563,6 +586,7 @@ private fun HomeContent(
                                 menuState = menuState,
                                 haptic = haptic,
                                 scope = scope,
+                                onOpenRemoteItem = { itemId -> onAction(HomeAction.OpenRemoteItem(itemId)) },
                                 modifier = Modifier.animateItem(),
                             )
                         }

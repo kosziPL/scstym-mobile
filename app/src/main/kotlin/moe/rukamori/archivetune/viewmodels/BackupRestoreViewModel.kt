@@ -22,10 +22,14 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.google.common.collect.ImmutableList
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -40,6 +44,7 @@ import moe.rukamori.archivetune.R
 import moe.rukamori.archivetune.constants.RedownloadOnRestoreKey
 import moe.rukamori.archivetune.backup.BackupArchiveCategory
 import moe.rukamori.archivetune.backup.BackupArchiveRepository
+import moe.rukamori.archivetune.backup.BackupOperationCoordinator
 import moe.rukamori.archivetune.backup.BackupArchiveStep
 import moe.rukamori.archivetune.backup.CreateBackupUseCase
 import moe.rukamori.archivetune.backup.ObserveScheduledBackupSettingsUseCase
@@ -55,6 +60,9 @@ import moe.rukamori.archivetune.extensions.div
 import moe.rukamori.archivetune.extensions.zipInputStream
 import moe.rukamori.archivetune.playback.MusicService
 import moe.rukamori.archivetune.playback.MusicService.Companion.PERSISTENT_QUEUE_FILE
+import moe.rukamori.archivetune.playlistexport.ExportPlaylistAsCsvUseCase
+import moe.rukamori.archivetune.playlistexport.ExportablePlaylist
+import moe.rukamori.archivetune.playlistexport.ObserveExportablePlaylistsUseCase
 import moe.rukamori.archivetune.utils.dataStore
 import moe.rukamori.archivetune.utils.reportException
 import org.xmlpull.v1.XmlPullParser
@@ -115,6 +123,43 @@ data class ScheduledBackupUiData(
     val overwriteExisting: Boolean,
     val showCustomDatePicker: Boolean,
 )
+
+sealed interface ExportPlaylistScreenState {
+    data object Loading : ExportPlaylistScreenState
+
+    @Immutable
+    data class Success(
+        val playlists: ImmutableList<ExportPlaylistUiModel>,
+        val isPickerVisible: Boolean,
+        val isExporting: Boolean,
+    ) : ExportPlaylistScreenState
+
+    data object Empty : ExportPlaylistScreenState
+
+    @Immutable
+    data class Error(
+        @StringRes val messageRes: Int,
+    ) : ExportPlaylistScreenState
+}
+
+@Immutable
+data class ExportPlaylistUiModel(
+    val id: String,
+    val name: String,
+    val songCount: Int,
+)
+
+sealed interface ExportPlaylistEvent {
+    @Immutable
+    data class CreateDocument(
+        val suggestedFileName: String,
+    ) : ExportPlaylistEvent
+
+    @Immutable
+    data class ShowMessage(
+        @StringRes val messageRes: Int,
+    ) : ExportPlaylistEvent
+}
 
 internal fun readCsvRecords(reader: Reader): Sequence<List<String>> =
     sequence {
@@ -205,8 +250,11 @@ class BackupRestoreViewModel
     constructor(
         val database: MusicDatabase,
         private val createBackupUseCase: CreateBackupUseCase,
+        private val backupOperationCoordinator: BackupOperationCoordinator,
         observeScheduledBackupSettings: ObserveScheduledBackupSettingsUseCase,
         private val updateScheduledBackup: UpdateScheduledBackupUseCase,
+        private val observeExportablePlaylists: ObserveExportablePlaylistsUseCase,
+        private val exportPlaylistAsCsv: ExportPlaylistAsCsvUseCase,
     ) : ViewModel() {
         private val _backupRestoreProgress = MutableStateFlow<BackupRestoreProgressUi?>(null)
         val backupRestoreProgress: StateFlow<BackupRestoreProgressUi?> = _backupRestoreProgress.asStateFlow()
@@ -220,10 +268,21 @@ class BackupRestoreViewModel
         private val _scheduledBackupEvent = MutableSharedFlow<Int>(extraBufferCapacity = 1)
         val scheduledBackupEvent: SharedFlow<Int> = _scheduledBackupEvent.asSharedFlow()
 
+        private val _exportPlaylistState = MutableStateFlow<ExportPlaylistScreenState>(ExportPlaylistScreenState.Loading)
+        val exportPlaylistState: StateFlow<ExportPlaylistScreenState> = _exportPlaylistState.asStateFlow()
+
+        private val _exportPlaylistEvent = MutableSharedFlow<ExportPlaylistEvent>(extraBufferCapacity = 1)
+        val exportPlaylistEvent: SharedFlow<ExportPlaylistEvent> = _exportPlaylistEvent.asSharedFlow()
+
         private var scheduledBackupSettings: ScheduledBackupSettings? = null
         private var showCustomDatePicker = false
         private var scheduledBackupUpdateJob: Job? = null
         private var manualBackupJob: Job? = null
+        private var restoreJob: Job? = null
+        private var exportablePlaylists: ImmutableList<ExportablePlaylist> = ImmutableList.of()
+        private var pendingExportPlaylistId: String? = null
+        private var exportPlaylistListJob: Job? = null
+        private var exportPlaylistJob: Job? = null
 
         init {
             viewModelScope.launch {
@@ -236,6 +295,126 @@ class BackupRestoreViewModel
                         publishScheduledBackupState()
                     }
             }
+            observeExportPlaylists()
+        }
+
+        fun onExportPlaylistClick() {
+            when (val state = _exportPlaylistState.value) {
+                ExportPlaylistScreenState.Loading -> Unit
+                ExportPlaylistScreenState.Empty -> {
+                    _exportPlaylistEvent.tryEmit(
+                        ExportPlaylistEvent.ShowMessage(R.string.export_playlist_empty),
+                    )
+                }
+
+                is ExportPlaylistScreenState.Error -> observeExportPlaylists()
+                is ExportPlaylistScreenState.Success -> {
+                    if (!state.isExporting) {
+                        _exportPlaylistState.value = state.copy(isPickerVisible = true)
+                    }
+                }
+            }
+        }
+
+        fun onExportPlaylistPickerDismissed() {
+            val state = _exportPlaylistState.value as? ExportPlaylistScreenState.Success ?: return
+            if (state.isPickerVisible) {
+                _exportPlaylistState.value = state.copy(isPickerVisible = false)
+            }
+        }
+
+        fun onExportPlaylistSelected(playlistId: String) {
+            val state = _exportPlaylistState.value as? ExportPlaylistScreenState.Success ?: return
+            if (state.isExporting) return
+            val playlist = exportablePlaylists.firstOrNull { item -> item.id == playlistId } ?: return
+            pendingExportPlaylistId = playlist.id
+            _exportPlaylistState.value = state.copy(isPickerVisible = false)
+            _exportPlaylistEvent.tryEmit(
+                ExportPlaylistEvent.CreateDocument(playlist.suggestedFileName),
+            )
+        }
+
+        fun onExportPlaylistDestinationSelected(destination: Uri?) {
+            val playlistId = pendingExportPlaylistId
+            pendingExportPlaylistId = null
+            if (destination == null || playlistId == null || exportPlaylistJob?.isActive == true) return
+
+            val state = _exportPlaylistState.value as? ExportPlaylistScreenState.Success ?: return
+            _exportPlaylistState.value = state.copy(isExporting = true)
+            exportPlaylistJob =
+                viewModelScope.launch {
+                    try {
+                        exportPlaylistAsCsv(playlistId = playlistId, destination = destination)
+                        _exportPlaylistEvent.emit(
+                            ExportPlaylistEvent.ShowMessage(R.string.export_playlist_success),
+                        )
+                    } catch (cancellation: CancellationException) {
+                        throw cancellation
+                    } catch (exception: Exception) {
+                        reportException(exception)
+                        _exportPlaylistState.value =
+                            ExportPlaylistScreenState.Error(R.string.export_playlist_failed_retry)
+                        _exportPlaylistEvent.emit(
+                            ExportPlaylistEvent.ShowMessage(R.string.export_playlist_failed),
+                        )
+                    } finally {
+                        val currentState = _exportPlaylistState.value
+                        if (currentState is ExportPlaylistScreenState.Success && currentState.isExporting) {
+                            _exportPlaylistState.value =
+                                if (currentState.playlists.isEmpty()) {
+                                    ExportPlaylistScreenState.Empty
+                                } else {
+                                    currentState.copy(isExporting = false)
+                                }
+                        }
+                    }
+                }
+        }
+
+        private fun observeExportPlaylists() {
+            exportPlaylistListJob?.cancel()
+            _exportPlaylistState.value = ExportPlaylistScreenState.Loading
+            exportPlaylistListJob =
+                viewModelScope.launch {
+                    observeExportablePlaylists()
+                        .catch { exception ->
+                            if (exception is CancellationException) throw exception
+                            reportException(exception)
+                            _exportPlaylistState.value =
+                                ExportPlaylistScreenState.Error(R.string.export_playlist_load_failed_retry)
+                        }.collect { playlists ->
+                            exportablePlaylists = ImmutableList.copyOf(playlists)
+                            if (playlists.isEmpty()) {
+                                val currentState = _exportPlaylistState.value as? ExportPlaylistScreenState.Success
+                                _exportPlaylistState.value =
+                                    if (currentState?.isExporting == true) {
+                                        currentState.copy(
+                                            playlists = ImmutableList.of(),
+                                            isPickerVisible = false,
+                                        )
+                                    } else {
+                                        ExportPlaylistScreenState.Empty
+                                    }
+                            } else {
+                                val currentState = _exportPlaylistState.value as? ExportPlaylistScreenState.Success
+                                _exportPlaylistState.value =
+                                    ExportPlaylistScreenState.Success(
+                                        playlists =
+                                            ImmutableList.copyOf(
+                                                playlists.map { playlist ->
+                                                    ExportPlaylistUiModel(
+                                                        id = playlist.id,
+                                                        name = playlist.name,
+                                                        songCount = playlist.songCount,
+                                                    )
+                                                },
+                                            ),
+                                        isPickerVisible = currentState?.isPickerVisible == true,
+                                        isExporting = currentState?.isExporting == true,
+                                    )
+                            }
+                        }
+                }
         }
 
         private fun emitProgress(
@@ -258,7 +437,7 @@ class BackupRestoreViewModel
             uri: Uri,
             categories: Set<BackupCategory>,
         ) {
-            if (manualBackupJob?.isActive == true) return
+            if (manualBackupJob?.isActive == true || restoreJob?.isActive == true) return
             manualBackupJob =
                 viewModelScope.launch(Dispatchers.IO) {
                     val title = context.getString(R.string.backup_in_progress)
@@ -392,149 +571,159 @@ class BackupRestoreViewModel
             uri: Uri,
             categories: Set<BackupCategory>,
         ) {
-            viewModelScope.launch(Dispatchers.IO) {
-                val title = context.getString(R.string.restore_in_progress)
-                try {
-                    val includeSettings = BackupCategory.SETTINGS in categories
-                    val includeAccount = BackupCategory.ACCOUNT in categories
-                    val includeLibrary = BackupCategory.LIBRARY in categories
-                    val includeDownloads = BackupCategory.DOWNLOADS in categories
-                    val settingsExcludedKeys = if (includeAccount) emptySet() else ACCOUNT_PREF_KEYS
-                    emitProgress(
-                        title = title,
-                        step = context.getString(R.string.restore_step_verifying),
-                        percent = 0,
-                        indeterminate = true,
-                    )
+            if (restoreJob?.isActive == true || manualBackupJob?.isActive == true) return
+            restoreJob = viewModelScope.launch(Dispatchers.IO) {
+                backupOperationCoordinator.withLock {
+                    val title = context.getString(R.string.restore_in_progress)
+                    try {
+                        val includeSettings = BackupCategory.SETTINGS in categories
+                        val includeAccount = BackupCategory.ACCOUNT in categories
+                        val includeLibrary = BackupCategory.LIBRARY in categories
+                        val includeDownloads = BackupCategory.DOWNLOADS in categories
+                        val settingsExcludedKeys = if (includeAccount) emptySet() else ACCOUNT_PREF_KEYS
+                        emitProgress(
+                            title = title,
+                            step = context.getString(R.string.restore_step_verifying),
+                            percent = 0,
+                            indeterminate = true,
+                        )
 
-                    val entryNames = ArrayList<String>()
-                    var hasDb = false
-                    context.applicationContext.contentResolver.openInputStream(uri)?.use { stream ->
-                        stream.zipInputStream().use { zip ->
-                            var entry = zip.nextEntry
-                            while (entry != null) {
-                                entryNames.add(entry.name)
-                                if (entry.name == InternalDatabase.DB_NAME) hasDb = true
-                                entry = zip.nextEntry
+                        val entryNames = ArrayList<String>()
+                        var hasDb = false
+                        context.applicationContext.contentResolver.openInputStream(uri)?.use { stream ->
+                            stream.zipInputStream().use { zip ->
+                                var entry = zip.nextEntry
+                                while (entry != null) {
+                                    entryNames.add(entry.name)
+                                    if (entry.name == InternalDatabase.DB_NAME) hasDb = true
+                                    entry = zip.nextEntry
+                                }
                             }
                         }
-                    }
-                    if (includeLibrary && !hasDb) throw IllegalStateException("Backup missing database")
+                        if (includeLibrary && !hasDb) throw IllegalStateException("Backup missing database")
 
-                    val restoreEntries =
-                        entryNames.filter { name ->
-                            (includeSettings && (name == SETTINGS_XML_FILENAME || name == SETTINGS_FILENAME)) ||
-                                (
-                                    includeLibrary && (
-                                        name == InternalDatabase.DB_NAME ||
-                                            name == "${InternalDatabase.DB_NAME}-wal" ||
-                                            name == "${InternalDatabase.DB_NAME}-shm" ||
-                                            name == "${InternalDatabase.DB_NAME}-journal"
+                        val restoreEntries =
+                            entryNames.filter { name ->
+                                (includeSettings && (name == SETTINGS_XML_FILENAME || name == SETTINGS_FILENAME)) ||
+                                    (
+                                        includeLibrary && (
+                                            name == InternalDatabase.DB_NAME ||
+                                                name == "${InternalDatabase.DB_NAME}-wal" ||
+                                                name == "${InternalDatabase.DB_NAME}-shm" ||
+                                                name == "${InternalDatabase.DB_NAME}-journal"
+                                        )
                                     )
-                                )
+                            }
+
+                        val totalUnits = 1 + (if (includeLibrary) 1 else 0) + restoreEntries.size
+                        val unitSpan = 100f / totalUnits.coerceAtLeast(1)
+                        var completedUnits = 0
+
+                        fun emit(
+                            step: String,
+                            indeterminate: Boolean,
+                        ) {
+                            val p = (completedUnits * unitSpan).roundToInt().coerceIn(0, 100)
+                            emitProgress(title = title, step = step, percent = p, indeterminate = indeterminate)
                         }
 
-                    val totalUnits = 1 + (if (includeLibrary) 1 else 0) + restoreEntries.size
-                    val unitSpan = 100f / totalUnits.coerceAtLeast(1)
-                    var completedUnits = 0
-
-                    fun emit(
-                        step: String,
-                        indeterminate: Boolean,
-                    ) {
-                        val p = (completedUnits * unitSpan).roundToInt().coerceIn(0, 100)
-                        emitProgress(title = title, step = step, percent = p, indeterminate = indeterminate)
-                    }
-
-                    completedUnits++
-                    if (includeLibrary) {
-                        emit(context.getString(R.string.restore_step_stopping_playback), indeterminate = true)
-                        runCatching { context.stopService(Intent(context, MusicService::class.java)) }
-                        runCatching { database.awaitIdle() }
-                        runCatching { database.checkpoint() }
-                        runCatching { database.close() }
-                        completedUnits++
-                    }
-
-                    context.applicationContext.contentResolver.openInputStream(uri)?.use { stream ->
-                        stream.zipInputStream().use { zip ->
-                            var entry = zip.nextEntry
-                            while (entry != null) {
-                                val name = entry.name
-                                if (name !in restoreEntries) {
-                                    entry = zip.nextEntry
-                                    continue
-                                }
-                                when (name) {
-                                    SETTINGS_XML_FILENAME -> {
-                                        emit(context.getString(R.string.restore_step_restoring_settings), indeterminate = true)
-                                        restoreSettingsFromXml(context, zip, settingsExcludedKeys)
-                                    }
-
-                                    SETTINGS_FILENAME -> {
-                                        emit(context.getString(R.string.restore_step_restoring_settings), indeterminate = true)
-                                        val settingsDir = context.filesDir / "datastore"
-                                        if (!settingsDir.exists()) settingsDir.mkdirs()
-                                        (settingsDir / SETTINGS_FILENAME).outputStream().use { out ->
-                                            zip.copyTo(out)
-                                        }
-                                    }
-
-                                    InternalDatabase.DB_NAME,
-                                    "${InternalDatabase.DB_NAME}-wal",
-                                    "${InternalDatabase.DB_NAME}-shm",
-                                    "${InternalDatabase.DB_NAME}-journal",
-                                    -> {
-                                        emit(context.getString(R.string.restore_step_restoring_file, name), indeterminate = true)
-                                        val dbFile = context.getDatabasePath(name)
-                                        if (dbFile.exists()) {
-                                            dbFile.delete()
-                                        }
-                                        FileOutputStream(dbFile).use { out ->
-                                            zip.copyTo(out)
-                                        }
-                                    }
+                        currentCoroutineContext().ensureActive()
+                        withContext(NonCancellable) {
+                            completedUnits++
+                            if (includeLibrary) {
+                                emit(context.getString(R.string.restore_step_stopping_playback), indeterminate = true)
+                                context.stopService(Intent(context, MusicService::class.java))
+                                database.awaitIdle()
+                                database.checkpoint()
+                                database.close()
+                                listOf("-wal", "-shm", "-journal").forEach { suffix ->
+                                    val sidecar = context.getDatabasePath("${InternalDatabase.DB_NAME}$suffix")
+                                    check(!sidecar.exists() || sidecar.delete()) { "Failed to clear database sidecar" }
                                 }
                                 completedUnits++
-                                entry = zip.nextEntry
                             }
-                        }
-                    }
 
-                    emitProgress(
-                        title = title,
-                        step = context.getString(R.string.restore_step_restarting),
-                        percent = 100,
-                        indeterminate = true,
-                    )
+                            context.applicationContext.contentResolver.openInputStream(uri)?.use { stream ->
+                                stream.zipInputStream().use { zip ->
+                                    var entry = zip.nextEntry
+                                    while (entry != null) {
+                                        val name = entry.name
+                                        if (name !in restoreEntries) {
+                                            entry = zip.nextEntry
+                                            continue
+                                        }
+                                        when (name) {
+                                            SETTINGS_XML_FILENAME -> {
+                                                emit(context.getString(R.string.restore_step_restoring_settings), indeterminate = true)
+                                                restoreSettingsFromXml(context, zip, settingsExcludedKeys)
+                                            }
 
-                    withContext(Dispatchers.Main) {
-                        Toast.makeText(context, R.string.restore_success, Toast.LENGTH_SHORT).show()
-                    }
+                                            SETTINGS_FILENAME -> {
+                                                emit(context.getString(R.string.restore_step_restoring_settings), indeterminate = true)
+                                                val settingsDir = context.filesDir / "datastore"
+                                                if (!settingsDir.exists()) settingsDir.mkdirs()
+                                                (settingsDir / SETTINGS_FILENAME).outputStream().use { out ->
+                                                    zip.copyTo(out)
+                                                }
+                                            }
 
-                    try {
-                        context.filesDir.resolve(PERSISTENT_QUEUE_FILE).delete()
-                    } catch (_: Exception) {
-                    }
-
-                    if (includeDownloads) {
-                        runCatching {
-                            context.dataStore.edit { prefs ->
-                                prefs[RedownloadOnRestoreKey] = true
+                                            InternalDatabase.DB_NAME,
+                                            "${InternalDatabase.DB_NAME}-wal",
+                                            "${InternalDatabase.DB_NAME}-shm",
+                                            "${InternalDatabase.DB_NAME}-journal",
+                                            -> {
+                                                emit(context.getString(R.string.restore_step_restoring_file, name), indeterminate = true)
+                                                val dbFile = context.getDatabasePath(name)
+                                                if (dbFile.exists()) {
+                                                    dbFile.delete()
+                                                }
+                                                FileOutputStream(dbFile).use { out ->
+                                                    zip.copyTo(out)
+                                                }
+                                            }
+                                        }
+                                        completedUnits++
+                                        entry = zip.nextEntry
+                                    }
+                                }
                             }
-                        }
-                    }
 
-                    _backupRestoreProgress.value = null
-                    context.startActivity(Intent(context, MainActivity::class.java))
-                    exitProcess(0)
-                } catch (e: Exception) {
-                    reportException(e)
-                    withContext(Dispatchers.Main) {
-                        Toast.makeText(context, e.message ?: context.getString(R.string.restore_failed), Toast.LENGTH_LONG).show()
+                            emitProgress(
+                                title = title,
+                                step = context.getString(R.string.restore_step_restarting),
+                                percent = 100,
+                                indeterminate = true,
+                            )
+
+                            withContext(Dispatchers.Main) {
+                                Toast.makeText(context, R.string.restore_success, Toast.LENGTH_SHORT).show()
+                            }
+
+                            try {
+                                context.filesDir.resolve(PERSISTENT_QUEUE_FILE).delete()
+                            } catch (_: Exception) {
+                            }
+
+                            if (includeDownloads) {
+                                context.dataStore.edit { prefs ->
+                                    prefs[RedownloadOnRestoreKey] = true
+                                }
+                            }
+
+                            _backupRestoreProgress.value = null
+                            context.startActivity(Intent(context, MainActivity::class.java))
+                            exitProcess(0)
+                        }
+                    } catch (cancellation: CancellationException) {
+                        throw cancellation
+                    } catch (e: Exception) {
+                        reportException(e)
+                        withContext(Dispatchers.Main) {
+                            Toast.makeText(context, e.message ?: context.getString(R.string.restore_failed), Toast.LENGTH_LONG).show()
+                        }
+                    } finally {
+                        _backupRestoreProgress.value = null
                     }
-                } finally {
-                    _backupRestoreProgress.value = null
                 }
             }
         }

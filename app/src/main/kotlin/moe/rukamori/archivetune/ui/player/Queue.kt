@@ -414,6 +414,7 @@ fun Queue(
         state = state,
         backgroundColor = Color.Unspecified,
         modifier = modifier,
+        onCollapsedContentClick = openQueue,
         collapsedContent = {
             when (playerDesignStyle) {
                 PlayerDesignStyle.V2 -> {
@@ -592,7 +593,7 @@ fun Queue(
                     )
                 }
 
-                PlayerDesignStyle.V9 -> {
+                PlayerDesignStyle.V9, PlayerDesignStyle.V10 -> {
                     val shuffleModeEnabled by playerConnection.shuffleModeEnabled.collectAsState()
                     QueueCollapsedContentV9(
                         showCodecOnPlayer = showCodecOnPlayer,
@@ -709,6 +710,10 @@ fun Queue(
                 } else {
                     null
                 }
+            }
+        val nextPlayingUid =
+            remember(currentWindowIndex, queueWindows) {
+                queueWindows.getOrNull(currentWindowIndex + 1)?.uid
             }
 
         val reorderableState =
@@ -987,6 +992,21 @@ fun Queue(
                                     }
 
                                     val trackMetadata = window.mediaItem.metadata ?: return@Row
+                                    val onPlayNextFromQueue =
+                                        remember(
+                                            window.uid,
+                                            window.firstPeriodIndex,
+                                            currentPlayingUid,
+                                            nextPlayingUid,
+                                        ) {
+                                            if (window.uid != currentPlayingUid && window.uid != nextPlayingUid) {
+                                                {
+                                                    playerConnection.moveQueueItemToNext(window.firstPeriodIndex)
+                                                }
+                                            } else {
+                                                null
+                                            }
+                                        }
                                     MediaMetadataListItem(
                                         mediaMetadata = trackMetadata,
                                         isSelected = selection && trackMetadata in selectedSongs,
@@ -1002,6 +1022,7 @@ fun Queue(
                                                             navController = navController,
                                                             playerBottomSheetState = playerBottomSheetState,
                                                             isQueueTrigger = true,
+                                                            onPlayNextFromQueue = onPlayNextFromQueue,
                                                             onRemoveFromQueue = {
                                                                 onRemoveWithUndo(window)
                                                             },

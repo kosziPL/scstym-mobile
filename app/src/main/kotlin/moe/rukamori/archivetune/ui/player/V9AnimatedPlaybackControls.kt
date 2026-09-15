@@ -1,3 +1,10 @@
+/*
+ * ArchiveTune (2026)
+ * © Rukamori — github.com/rukamori
+ * GPL-3.0 License | Contributors: see git history
+ * Do not remove or alter this notice. - Per GPL-3.0 Section 4 & Section 5
+ */
+
 package moe.rukamori.archivetune.ui.player
 
 import androidx.compose.animation.Crossfade
@@ -84,7 +91,7 @@ fun V9AnimatedPlaybackControls(
     val hapticFeedback = LocalHapticFeedback.current
     val coroutineScope = rememberCoroutineScope()
 
-    val motionScheme = remember { MotionScheme.expressive() }
+    val motionScheme = remember { MotionScheme.standard() }
     val defaultSpatialDpSpec = remember { motionScheme.defaultSpatialSpec<Dp>() }
 
     LaunchedEffect(lastClicked, clickTrigger) {

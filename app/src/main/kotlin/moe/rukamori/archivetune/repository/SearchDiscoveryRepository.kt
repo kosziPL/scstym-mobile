@@ -13,6 +13,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.yield
 import kotlinx.coroutines.withContext
 import moe.rukamori.archivetune.db.MusicDatabase
 import moe.rukamori.archivetune.db.entities.Artist
@@ -104,17 +105,20 @@ class SearchDiscoveryRepository
                             fromTimeStamp = AllHistoryTimestamp,
                             limit = MaxHistoryLookupItems,
                         ).first()
-                        .filterNot { song -> song.song.isLocal }
+                        .filterNot { song -> song.song.isLocal || song.song.isPodcast }
                         .take(MaxSuggestionSeedItems)
                 val seedSongIds = seedSongs.mapTo(HashSet()) { song -> song.id }
 
                 seedSongs
-                    .map { song ->
-                        async {
-                            loadRelatedSongs(song)
-                                .ifEmpty { searchRelatedSongs(song) }
-                        }
-                    }.awaitAll()
+                    .chunked(ConcurrentRequestBatchSize)
+                    .flatMap { batch ->
+                        batch.map { song ->
+                            async {
+                                loadRelatedSongs(song)
+                                    .ifEmpty { searchRelatedSongs(song) }
+                            }
+                        }.awaitAll().also { yield() }
+                    }
                     .flatten()
                     .filterNot { song -> song.id in seedSongIds }
                     .distinctBy { song -> song.id }
@@ -156,7 +160,7 @@ class SearchDiscoveryRepository
             coroutineScope {
                 val seedArtists =
                     database
-                        .mostPlayedArtists(
+                        .mostPlayedMusicArtists(
                             fromTimeStamp = AllHistoryTimestamp,
                             limit = MaxHistoryLookupItems,
                         ).first()
@@ -165,12 +169,15 @@ class SearchDiscoveryRepository
                 val seedArtistIds = seedArtists.mapTo(HashSet()) { artist -> artist.id }
 
                 seedArtists
-                    .map { artist ->
-                        async {
-                            loadRelatedArtists(artist)
-                                .ifEmpty { searchRelatedArtists(artist) }
-                        }
-                    }.awaitAll()
+                    .chunked(ConcurrentRequestBatchSize)
+                    .flatMap { batch ->
+                        batch.map { artist ->
+                            async {
+                                loadRelatedArtists(artist)
+                                    .ifEmpty { searchRelatedArtists(artist) }
+                            }
+                        }.awaitAll().also { yield() }
+                    }
                     .flatten()
                     .filterNot { artist -> artist.id in seedArtistIds }
                     .distinctBy { artist -> artist.id }
@@ -199,8 +206,9 @@ class SearchDiscoveryRepository
         private companion object {
             const val AllHistoryTimestamp = 0L
             const val MaxHistoryLookupItems = 36
-            const val MaxSuggestionSeedItems = 6
+            const val MaxSuggestionSeedItems = 4
             const val MaxSuggestedItems = 12
             const val TopAlbumsQuery = "top albums"
+            const val ConcurrentRequestBatchSize = 3
         }
     }

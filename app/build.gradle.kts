@@ -65,8 +65,8 @@ android {
     applicationId = "moe.rukamori.archivetune"
         minSdk = 26
         targetSdk = 37
-        versionCode = 140
-        versionName = "14.1.0"
+        versionCode = 141
+        versionName = "15.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
@@ -88,21 +88,10 @@ android {
                 ?: ""
         buildConfigField("String", "TOGETHER_BEARER_TOKEN", "\"$togetherBearerToken\"")
 
-        val canvasBearerToken =
-            localProperties.getProperty("CANVAS_BEARER_TOKEN")
-                ?: System.getenv("CANVAS_BEARER_TOKEN")
-                ?: ""
-        buildConfigField("String", "CANVAS_BEARER_TOKEN", "\"$canvasBearerToken\"")
-
-        val extractorBearer =
-            localProperties.getProperty("EXTRACTOR_BEARER")
-                ?: System.getenv("EXTRACTOR_BEARER")
-                ?: ""
-        buildConfigField("String", "EXTRACTOR_BEARER", "\"$extractorBearer\"")
-
         buildConfigField("String", "DATA_SERVER_URL", dataServerUrl.asBuildConfigString())
         buildConfigField("String", "API_BEARER_TOKEN", apiBearerToken.asBuildConfigString())
         buildConfigField("boolean", "GATEKEEPER_ENABLED", "false")
+        buildConfigField("boolean", "LEAK_CANARY_TOGGLE_AVAILABLE", "false")
 
         val nightlyBuildHash =
             (
@@ -111,8 +100,37 @@ android {
                     ?: ""
                 ).trim()
         buildConfigField("String", "NIGHTLY_BUILD_HASH", "\"$nightlyBuildHash\"")
+
+        val nightlyVersionName =
+            providers.gradleProperty("nightlyVersionName").orNull?.trim().orEmpty()
+        if (nightlyVersionName.isNotEmpty()) {
+            versionName = nightlyVersionName
+        }
         buildConfigField("String", "DISTRIBUTION", "\"gms\"")
         buildConfigField("boolean", "UPDATER_AVAILABLE", "true")
+
+        val githubOwner =
+            System.getenv("GITHUB_OWNER")?.trim()
+                ?: localProperties.getProperty("GITHUB_OWNER")?.trim()
+                ?: "rukamori"
+        val githubRepo =
+            System.getenv("GITHUB_REPO")?.trim()
+                ?: localProperties.getProperty("GITHUB_REPO")?.trim()
+                ?: "ArchiveTune"
+        buildConfigField("String", "GITHUB_OWNER", githubOwner.asBuildConfigString())
+        buildConfigField("String", "GITHUB_REPO", githubRepo.asBuildConfigString())
+        buildConfigField("boolean", "IS_NIGHTLY_BUILD", "false")
+
+        val releaseGithubOwner =
+            System.getenv("RELEASE_GITHUB_OWNER")?.trim()
+                ?: localProperties.getProperty("RELEASE_GITHUB_OWNER")?.trim()
+                ?: githubOwner
+        val releaseGithubRepo =
+            System.getenv("RELEASE_GITHUB_REPO")?.trim()
+                ?: localProperties.getProperty("RELEASE_GITHUB_REPO")?.trim()
+                ?: githubRepo
+        buildConfigField("String", "RELEASE_GITHUB_OWNER", releaseGithubOwner.asBuildConfigString())
+        buildConfigField("String", "RELEASE_GITHUB_REPO", releaseGithubRepo.asBuildConfigString())
     }
 
     flavorDimensions += listOf("distribution", "device", "abi")
@@ -201,6 +219,30 @@ android {
             applicationIdSuffix = ".debug"
             isDebuggable = true
         }
+        create("nightly") {
+            applicationIdSuffix = ".nightly"
+            isDebuggable = false
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+            buildConfigField("boolean", "LEAK_CANARY_TOGGLE_AVAILABLE", "true")
+            buildConfigField("boolean", "IS_NIGHTLY_BUILD", "true")
+            matchingFallbacks += listOf("release")
+
+            val nightlyReleaseOwner =
+                System.getenv("NIGHTLY_RELEASE_GITHUB_OWNER")?.trim()
+                    ?: localProperties.getProperty("NIGHTLY_RELEASE_GITHUB_OWNER")?.trim()
+                    ?: "rukamori"
+            val nightlyReleaseRepo =
+                System.getenv("NIGHTLY_RELEASE_GITHUB_REPO")?.trim()
+                    ?: localProperties.getProperty("NIGHTLY_RELEASE_GITHUB_REPO")?.trim()
+                    ?: "canary"
+            buildConfigField("String", "RELEASE_GITHUB_OWNER", nightlyReleaseOwner.asBuildConfigString())
+            buildConfigField("String", "RELEASE_GITHUB_REPO", nightlyReleaseRepo.asBuildConfigString())
+        }
     }
 
     compileOptions {
@@ -276,6 +318,8 @@ dependencies {
     compileOnly("androidx.compose.ui:ui-tooling-preview:${libs.versions.compose.get()}")
     debugImplementation("androidx.compose.ui:ui-tooling-preview:${libs.versions.compose.get()}")
     debugImplementation(libs.compose.ui.tooling)
+    debugImplementation(libs.leakcanary.android)
+    add("nightlyImplementation", libs.leakcanary.android)
     implementation(libs.compose.animation)
     implementation(libs.compose.material.icons.extended)
     implementation(libs.compose.reorderable)
@@ -285,6 +329,7 @@ dependencies {
     implementation(libs.lifecycle.runtime.compose)
 
     implementation(libs.material3)
+    implementation(libs.androidx.graphics.shapes)
     implementation(libs.palette)
     implementation(libs.androidsvg)
     implementation(libs.aboutlibraries.core)
@@ -316,6 +361,7 @@ dependencies {
     implementation("androidx.media3:media3-ui-compose:${libs.versions.media3.get()}")
     add("gmsImplementation", libs.media3.cast)
     add("gmsImplementation", libs.mediarouter)
+    add("gmsImplementation", "com.google.android.gms:play-services-auth:22.0.0")
     implementation(libs.squigglyslider)
 
 
@@ -344,10 +390,10 @@ dependencies {
     implementation(project(":canvas"))
     implementation(project(":shazamkit"))
     implementation(project(":spotifycore"))
-    implementation(project(":moriextractor"))
     implementation(project(":morideobfuscator"))
     implementation("com.materialkolor:material-kolor:5.0.0-alpha07")
 
+    implementation(libs.webkit)
     implementation(libs.ktor.client.core)
     implementation(libs.ktor.client.okhttp)
     implementation(libs.ktor.serialization.json)
@@ -367,8 +413,6 @@ dependencies {
     implementation("androidx.compose.material3.adaptive:adaptive:1.3.0-rc01")
     implementation(libs.accompanist.lyrics.ui)
     implementation(libs.accompanist.lyrics.core)
-
-    implementation("org.json:json:20240303")
 }
 
 androidComponents {

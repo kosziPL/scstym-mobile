@@ -91,6 +91,7 @@ import moe.rukamori.archivetune.LocalDownloadUtil
 import moe.rukamori.archivetune.LocalPlayerConnection
 import moe.rukamori.archivetune.R
 import moe.rukamori.archivetune.constants.ArchiveTuneCanvasKey
+import moe.rukamori.archivetune.constants.AodModeEnabledKey
 import moe.rukamori.archivetune.constants.ArtistSeparatorsKey
 import moe.rukamori.archivetune.constants.ExternalDownloaderEnabledKey
 import moe.rukamori.archivetune.constants.ExternalDownloaderPackageKey
@@ -109,9 +110,11 @@ import moe.rukamori.archivetune.ui.component.MenuSurfaceSection
 import moe.rukamori.archivetune.ui.component.NewAction
 import moe.rukamori.archivetune.ui.component.NewActionGrid
 import moe.rukamori.archivetune.ui.player.rememberDeviceMusicVolumeController
+import moe.rukamori.archivetune.utils.ExternalDownloaderLaunchResult
 import moe.rukamori.archivetune.utils.SpeedDialPin
 import moe.rukamori.archivetune.utils.SpeedDialPinType
 import moe.rukamori.archivetune.utils.isLocalMediaId
+import moe.rukamori.archivetune.utils.openExternalDownloader
 import moe.rukamori.archivetune.utils.parseSpeedDialPins
 import moe.rukamori.archivetune.utils.rememberEnumPreference
 import moe.rukamori.archivetune.utils.rememberLowDataModeActive
@@ -131,6 +134,7 @@ fun PlayerMenu(
     navController: NavController,
     playerBottomSheetState: BottomSheetState,
     isQueueTrigger: Boolean? = false,
+    onPlayNextFromQueue: (() -> Unit)? = null,
     onRemoveFromQueue: (() -> Unit)? = null,
     onShowDetailsDialog: () -> Unit,
     onDismiss: () -> Unit,
@@ -161,10 +165,12 @@ fun PlayerMenu(
     // Artist separators for splitting artist names
     val (artistSeparators) = rememberPreference(ArtistSeparatorsKey, defaultValue = ",;/&")
     val (externalDownloaderEnabled) = rememberPreference(ExternalDownloaderEnabledKey, defaultValue = false)
+    val (aodFeatureEnabled, onAodFeatureEnabledChange) = rememberPreference(AodModeEnabledKey, defaultValue = false)
     val (externalDownloaderPackage) = rememberPreference(ExternalDownloaderPackageKey, defaultValue = "")
     val (archiveTuneCanvasEnabled) = rememberPreference(ArchiveTuneCanvasKey, defaultValue = false)
     val playerDesignStyle by rememberEnumPreference(PlayerDesignStyleKey, defaultValue = PlayerDesignStyle.V4)
     val lowDataModeActive = rememberLowDataModeActive()
+    val canvasNetworkAllowed by playerConnection.canvasNetworkAllowed.collectAsStateWithLifecycle()
     val isCanvasArtworkRefetching by playerConnection.isCanvasArtworkRefetching.collectAsStateWithLifecycle()
     val (speedDialSongIds, onSpeedDialSongIdsChange) = rememberPreference(SpeedDialSongIdsKey, "")
     val speedDialPins = remember(speedDialSongIds) { parseSpeedDialPins(speedDialSongIds) }
@@ -437,7 +443,7 @@ fun PlayerMenu(
                     actions =
                         buildList {
                             castPlayerMenuAction?.let(::add)
-                            if (!isLocalMedia) {
+                            if (!isLocalMedia && !mediaMetadata.isPodcast) {
                                 add(
                                     NewAction(
                                         icon = {
@@ -461,6 +467,7 @@ fun PlayerMenu(
                                 isQueueTrigger != true &&
                                 archiveTuneCanvasEnabled &&
                                 !lowDataModeActive &&
+                                canvasNetworkAllowed &&
                                 playerDesignStyle != PlayerDesignStyle.V5
                             ) {
                                 add(
@@ -617,6 +624,8 @@ fun PlayerMenu(
                                 )
                             }
                             if (isQueueTrigger != true) {
+                                val aodBgColor = if (aodFeatureEnabled) MaterialTheme.colorScheme.primary else Color.Unspecified
+                                val aodContentColor = if (aodFeatureEnabled) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
                                 add(
                                     NewAction(
                                         icon = {
@@ -624,14 +633,15 @@ fun PlayerMenu(
                                                 painter = painterResource(R.drawable.bedtime),
                                                 contentDescription = null,
                                                 modifier = Modifier.size(28.dp),
-                                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                tint = aodContentColor,
                                             )
                                         },
                                         text = stringResource(R.string.aod_mode),
                                         onClick = {
-                                            playerConnection.aodModeEnabled.value = true
-                                            onDismiss()
+                                            onAodFeatureEnabledChange(!aodFeatureEnabled)
                                         },
+                                        backgroundColor = aodBgColor,
+                                        contentColor = aodContentColor,
                                     ),
                                 )
                             }
@@ -803,30 +813,24 @@ fun PlayerMenu(
                                 Modifier.clickable {
                                     onDismiss()
                                     val url = "https://music.youtube.com/watch?v=${mediaMetadata.id}"
-                                    if (externalDownloaderPackage.isBlank()) {
-                                        Toast
-                                            .makeText(
-                                                context,
-                                                context.getString(R.string.external_downloader_not_configured),
-                                                Toast.LENGTH_LONG,
-                                            ).show()
-                                        return@clickable
-                                    }
-                                    val intent =
-                                        android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
-                                            setPackage(externalDownloaderPackage)
-                                            data = android.net.Uri.parse(url)
-                                            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    when (context.openExternalDownloader(externalDownloaderPackage, url)) {
+                                        ExternalDownloaderLaunchResult.STARTED -> Unit
+                                        ExternalDownloaderLaunchResult.NOT_CONFIGURED -> {
+                                            Toast
+                                                .makeText(
+                                                    context,
+                                                    context.getString(R.string.external_downloader_not_configured),
+                                                    Toast.LENGTH_LONG,
+                                                ).show()
                                         }
-                                    try {
-                                        context.startActivity(intent)
-                                    } catch (e: android.content.ActivityNotFoundException) {
-                                        Toast
-                                            .makeText(
-                                                context,
-                                                context.getString(R.string.external_downloader_not_installed),
-                                                Toast.LENGTH_SHORT,
-                                            ).show()
+                                        ExternalDownloaderLaunchResult.NOT_INSTALLED -> {
+                                            Toast
+                                                .makeText(
+                                                    context,
+                                                    context.getString(R.string.external_downloader_not_installed),
+                                                    Toast.LENGTH_SHORT,
+                                                ).show()
+                                        }
                                     }
                                 },
                             colors = ListItemDefaults.colors(containerColor = Color.Transparent),
@@ -838,6 +842,31 @@ fun PlayerMenu(
         item {
             MenuSurfaceSection(modifier = Modifier.padding(vertical = 6.dp)) {
                 Column {
+                    if (isQueueTrigger == true && onPlayNextFromQueue != null) {
+                        ListItem(
+                            headlineContent = {
+                                Text(text = stringResource(R.string.play_next))
+                            },
+                            leadingContent = {
+                                Icon(
+                                    painter = painterResource(R.drawable.playlist_play),
+                                    contentDescription = null,
+                                )
+                            },
+                            modifier =
+                                Modifier.clickable {
+                                    onPlayNextFromQueue()
+                                    onDismiss()
+                                },
+                            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                        )
+
+                        HorizontalDivider(
+                            modifier = Modifier.padding(start = 56.dp),
+                            color = MaterialTheme.colorScheme.outlineVariant,
+                        )
+                    }
+
                     if (isQueueTrigger == true && onRemoveFromQueue != null) {
                         ListItem(
                             headlineContent = {

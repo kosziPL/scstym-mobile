@@ -38,6 +38,7 @@ import moe.rukamori.archivetune.db.entities.EventWithSong
 import moe.rukamori.archivetune.db.entities.FormatEntity
 import moe.rukamori.archivetune.db.entities.LibraryTopMixEntity
 import moe.rukamori.archivetune.db.entities.LibraryTopMixSongMap
+import moe.rukamori.archivetune.db.entities.LikedSongDate
 import moe.rukamori.archivetune.db.entities.ListeningBySlot
 import moe.rukamori.archivetune.db.entities.ListeningTotals
 import moe.rukamori.archivetune.db.entities.LyricsEntity
@@ -81,6 +82,9 @@ interface DatabaseDao {
     @Transaction
     @Query("SELECT * FROM song WHERE inLibrary IS NOT NULL ORDER BY rowId")
     fun songsByRowIdAsc(): Flow<List<Song>>
+
+    @Query("SELECT id FROM song WHERE inLibrary IS NOT NULL")
+    suspend fun librarySongIds(): List<String>
 
     @Transaction
     @Query("SELECT * FROM song WHERE inLibrary IS NOT NULL ORDER BY inLibrary")
@@ -206,6 +210,9 @@ interface DatabaseDao {
     @Query("SELECT * FROM song WHERE liked ORDER BY totalPlayTime")
     fun likedSongsByPlayTimeAsc(): Flow<List<Song>>
 
+    @Query("SELECT id, likedDate FROM song WHERE liked AND likedDate IS NOT NULL AND id IN (:songIds)")
+    suspend fun likedSongDates(songIds: List<String>): List<LikedSongDate>
+
     fun likedSongs(
         sortType: SongSortType,
         descending: Boolean,
@@ -313,6 +320,10 @@ interface DatabaseDao {
     @Transaction
     @Query("SELECT * FROM playlist_song_map WHERE playlistId = :playlistId ORDER BY position")
     fun playlistSongs(playlistId: String): Flow<List<PlaylistSong>>
+
+    @Transaction
+    @Query("SELECT * FROM playlist_song_map WHERE playlistId = :playlistId ORDER BY position")
+    suspend fun getPlaylistSongs(playlistId: String): List<PlaylistSong>
 
     @Transaction
     @Query(
@@ -550,6 +561,51 @@ interface DatabaseDao {
     @SuppressWarnings(RoomWarnings.QUERY_MISMATCH)
     @Query(
         """
+        SELECT artist.*,
+               (SELECT COUNT(1)
+                FROM song_artist_map
+                         JOIN event ON song_artist_map.songId = event.songId
+                         JOIN song ON song.id = song_artist_map.songId
+                WHERE artistId = artist.id
+                  AND song.isPodcast = 0
+                  AND timestamp > :fromTimeStamp AND timestamp <= :toTimeStamp) AS songCount,
+               (SELECT SUM(event.playTime)
+                FROM song_artist_map
+                         JOIN event ON song_artist_map.songId = event.songId
+                         JOIN song ON song.id = song_artist_map.songId
+                WHERE artistId = artist.id
+                  AND song.isPodcast = 0
+                  AND timestamp > :fromTimeStamp AND timestamp <= :toTimeStamp) AS timeListened
+        FROM artist
+                 JOIN(SELECT artistId, SUM(songTotalPlayTime) AS totalPlayTime
+                      FROM song_artist_map
+                               JOIN song ON song.id = song_artist_map.songId
+                               JOIN (SELECT songId, SUM(playTime) AS songTotalPlayTime
+                                     FROM event
+                                     WHERE timestamp > :fromTimeStamp
+                                     AND timestamp <= :toTimeStamp
+                                     GROUP BY songId) AS e
+                                    ON song_artist_map.songId = e.songId
+                      WHERE song.isPodcast = 0
+                      GROUP BY artistId
+                      ORDER BY totalPlayTime DESC
+                      LIMIT :limit
+                      OFFSET :offset)
+                     ON artist.id = artistId
+        WHERE artist.blockedAt IS NULL
+    """,
+    )
+    fun mostPlayedMusicArtists(
+        fromTimeStamp: Long,
+        limit: Int = 6,
+        offset: Int = 0,
+        toTimeStamp: Long? = LocalDateTime.now().toInstant(ZoneOffset.UTC).toEpochMilli(),
+    ): Flow<List<Artist>>
+
+    @Transaction
+    @SuppressWarnings(RoomWarnings.QUERY_MISMATCH)
+    @Query(
+        """
     SELECT album.*,
            COUNT(DISTINCT song_album_map.songId) as downloadCount,
            (SELECT COUNT(1)
@@ -761,6 +817,9 @@ interface DatabaseDao {
     @Transaction
     @Query("SELECT * FROM format WHERE id = :id")
     fun format(id: String?): Flow<FormatEntity?>
+
+    @Query("SELECT * FROM format WHERE id = :id LIMIT 1")
+    fun getFormatByIdBlocking(id: String): FormatEntity?
 
     @Transaction
     @Query("SELECT * FROM lyrics WHERE id = :id")
@@ -1241,6 +1300,34 @@ interface DatabaseDao {
         customOrder: Int?,
     )
 
+    @Query(
+        """
+        UPDATE playlist SET thumbnailUrl = :thumbnailUrl
+        WHERE browseId = :browseId AND thumbnailUrl = :previousThumbnailUrl
+        """,
+    )
+    fun refreshPlaylistThumbnail(
+        browseId: String,
+        previousThumbnailUrl: String,
+        thumbnailUrl: String,
+    )
+
+    @Query(
+        "UPDATE song SET liked = 0, likedDate = NULL, inLibrary = NULL WHERE isLocal = 0 AND (liked = 1 OR inLibrary IS NOT NULL)",
+    )
+    fun clearRemoteSongLibraryState()
+
+    @Query(
+        "UPDATE album SET bookmarkedAt = NULL, likedDate = NULL, inLibrary = NULL WHERE isLocal = 0 AND (bookmarkedAt IS NOT NULL OR likedDate IS NOT NULL OR inLibrary IS NOT NULL)",
+    )
+    fun clearRemoteAlbumLibraryState()
+
+    @Query("UPDATE artist SET bookmarkedAt = NULL WHERE isLocal = 0 AND bookmarkedAt IS NOT NULL")
+    fun clearRemoteArtistLibraryState()
+
+    @Query("UPDATE playlist SET bookmarkedAt = NULL WHERE browseId IS NOT NULL AND bookmarkedAt IS NOT NULL")
+    fun clearRemotePlaylistLibraryState()
+
     @Query("UPDATE playlist SET songSortType = :sortType, songSortDescending = :descending WHERE id = :playlistId")
     fun updatePlaylistSortPreference(
         playlistId: String,
@@ -1489,6 +1576,12 @@ interface DatabaseDao {
     @Transaction
     @Query("DELETE FROM event")
     fun clearListenHistory()
+
+    @Query("UPDATE song SET totalPlayTime = 0 WHERE totalPlayTime != 0")
+    suspend fun resetTotalPlayTime()
+
+    @Query("DELETE FROM playCount")
+    suspend fun clearPlayCounts()
 
     @Transaction
     @Query("DELETE FROM event WHERE id IN (:eventIds)")
@@ -1741,13 +1834,14 @@ interface DatabaseDao {
     ) {
         update(
             song.song.copy(
-                title = mediaMetadata.title,
+                title = if (song.song.titleOverride) song.song.title else mediaMetadata.title,
                 duration = mediaMetadata.duration,
                 thumbnailUrl = mediaMetadata.thumbnailUrl,
                 albumId = mediaMetadata.album?.id,
                 albumName = mediaMetadata.album?.title,
                 explicit = mediaMetadata.explicit,
                 isMusicVideo = mediaMetadata.isMusicVideo,
+                isPodcast = mediaMetadata.isPodcast,
             ),
         )
         songArtistMap(song.id).forEach(::delete)

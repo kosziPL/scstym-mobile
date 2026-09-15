@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -20,7 +21,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -29,7 +29,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavController
+import com.google.common.collect.ImmutableList
 import moe.rukamori.archivetune.LocalPlayerAwareWindowInsets
 import moe.rukamori.archivetune.R
 import moe.rukamori.archivetune.constants.ArtistSeparatorsKey
@@ -48,49 +53,101 @@ import moe.rukamori.archivetune.constants.ExternalDownloaderEnabledKey
 import moe.rukamori.archivetune.constants.ExternalDownloaderPackageKey
 import moe.rukamori.archivetune.constants.HISTORY_DURATION_DEFAULT
 import moe.rukamori.archivetune.constants.HistoryDuration
-import moe.rukamori.archivetune.constants.LowDataModeKey
 import moe.rukamori.archivetune.constants.PauseOnDeviceMuteKey
 import moe.rukamori.archivetune.constants.PermanentShuffleKey
 import moe.rukamori.archivetune.constants.PersistentQueueKey
-import moe.rukamori.archivetune.constants.PlayerStreamClient
-import moe.rukamori.archivetune.constants.PlayerStreamClientKey
 import moe.rukamori.archivetune.constants.SeekExtraSeconds
 import moe.rukamori.archivetune.constants.SkipSilenceKey
 import moe.rukamori.archivetune.constants.StopMusicOnTaskClearKey
 import moe.rukamori.archivetune.constants.WakelockKey
+import moe.rukamori.archivetune.sponsorblock.DEFAULT_SPONSOR_BLOCK_API_URL
 import moe.rukamori.archivetune.ui.component.ArtistSeparatorsDialog
 import moe.rukamori.archivetune.ui.component.CrossfadeSliderPreference
 import moe.rukamori.archivetune.ui.component.EnumListPreference
 import moe.rukamori.archivetune.ui.component.IconButton
-import moe.rukamori.archivetune.ui.component.ListPreference
+import moe.rukamori.archivetune.ui.component.MultiSelectListPreference
 import moe.rukamori.archivetune.ui.component.NumberPickerPreference
 import moe.rukamori.archivetune.ui.component.PreferenceEntry
 import moe.rukamori.archivetune.ui.component.PreferenceGroup
+import moe.rukamori.archivetune.ui.component.PreferenceGroupScope
 import moe.rukamori.archivetune.ui.component.SliderPreference
 import moe.rukamori.archivetune.ui.component.SwitchPreference
-import moe.rukamori.archivetune.ui.component.TagsManagementDialog
 import moe.rukamori.archivetune.ui.component.TextFieldDialog
 import moe.rukamori.archivetune.ui.utils.backToMain
 import moe.rukamori.archivetune.utils.rememberEnumPreference
 import moe.rukamori.archivetune.utils.rememberPreference
+import moe.rukamori.archivetune.viewmodels.PlaybackPerformanceSettingsUiState
+import moe.rukamori.archivetune.viewmodels.PlaybackPerformanceSettingsViewModel
+import moe.rukamori.archivetune.viewmodels.SponsorBlockCategoryUiModel
+import moe.rukamori.archivetune.viewmodels.SponsorBlockSettingsScreenState
+import moe.rukamori.archivetune.viewmodels.SponsorBlockSettingsViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PlayerSettings(navController: NavController) {
+    val playbackPerformanceSettingsViewModel: PlaybackPerformanceSettingsViewModel =
+        hiltViewModel()
+    val playbackPerformanceSettingsState by
+        playbackPerformanceSettingsViewModel.uiState.collectAsStateWithLifecycle()
+    val onLowDataModeChange =
+        remember(playbackPerformanceSettingsViewModel) {
+            playbackPerformanceSettingsViewModel::onLowDataModeChange
+        }
+    val onPreloadNextSongChange =
+        remember(playbackPerformanceSettingsViewModel) {
+            playbackPerformanceSettingsViewModel::onPreloadNextSongChange
+        }
+    val onPlaybackPerformanceRetry =
+        remember(playbackPerformanceSettingsViewModel) {
+            playbackPerformanceSettingsViewModel::retry
+        }
+    val sponsorBlockSettingsViewModel: SponsorBlockSettingsViewModel = hiltViewModel()
+    val sponsorBlockSettingsState by
+        sponsorBlockSettingsViewModel.uiState.collectAsStateWithLifecycle()
+    val onSponsorBlockEnabledChange =
+        remember(sponsorBlockSettingsViewModel) {
+            sponsorBlockSettingsViewModel::onEnabledChange
+        }
+    val onSponsorBlockCategorySheetOpen =
+        remember(sponsorBlockSettingsViewModel) {
+            sponsorBlockSettingsViewModel::onCategorySheetOpen
+        }
+    val onSponsorBlockCategorySheetDismiss =
+        remember(sponsorBlockSettingsViewModel) {
+            sponsorBlockSettingsViewModel::onCategorySheetDismiss
+        }
+    val onSponsorBlockCategoryCheckedChange =
+        remember(sponsorBlockSettingsViewModel) {
+            sponsorBlockSettingsViewModel::onCategoryOptionCheckedChange
+        }
+    val onSponsorBlockCategorySelectionConfirm =
+        remember(sponsorBlockSettingsViewModel) {
+            sponsorBlockSettingsViewModel::onCategorySelectionConfirm
+        }
+    val onSponsorBlockApiUrlEditorOpen =
+        remember(sponsorBlockSettingsViewModel) {
+            sponsorBlockSettingsViewModel::onApiUrlEditorOpen
+        }
+    val onSponsorBlockApiUrlEditorDismiss =
+        remember(sponsorBlockSettingsViewModel) {
+            sponsorBlockSettingsViewModel::onApiUrlEditorDismiss
+        }
+    val onSponsorBlockApiUrlDraftChange =
+        remember(sponsorBlockSettingsViewModel) {
+            sponsorBlockSettingsViewModel::onApiUrlDraftChange
+        }
+    val onSponsorBlockApiUrlConfirm =
+        remember(sponsorBlockSettingsViewModel) {
+            sponsorBlockSettingsViewModel::onApiUrlConfirm
+        }
+    val onSponsorBlockRetry =
+        remember(sponsorBlockSettingsViewModel) {
+            sponsorBlockSettingsViewModel::retry
+        }
     val (audioQuality, onAudioQualityChange) =
         rememberEnumPreference(
             AudioQualityKey,
             defaultValue = AudioQuality.AUTO,
-        )
-    val (playerStreamClient, onPlayerStreamClientChange) =
-        rememberEnumPreference(
-            PlayerStreamClientKey,
-            defaultValue = PlayerStreamClient.WEB_REMIX,
-        )
-    val (lowDataMode, onLowDataModeChange) =
-        rememberPreference(
-            LowDataModeKey,
-            defaultValue = true,
         )
     val (persistentQueue, onPersistentQueueChange) =
         rememberPreference(
@@ -200,44 +257,8 @@ fun PlayerSettings(navController: NavController) {
             WakelockKey,
             defaultValue = false,
         )
-    val isArchiveTuneExtractorEnabled = false
-    val playerStreamClients =
-        remember {
-            listOf(
-                PlayerStreamClient.WEB_REMIX,
-                PlayerStreamClient.ARCHIVETUNE_EXTRACTOR,
-            )
-        }
-    val selectedPlayerStreamClient =
-        if (playerStreamClient in playerStreamClients) {
-            playerStreamClient
-        } else {
-            PlayerStreamClient.WEB_REMIX
-        }
-    val audioQualityEnabled = selectedPlayerStreamClient != PlayerStreamClient.ARCHIVETUNE_EXTRACTOR
-    val isPlayerStreamClientEnabled =
-        remember(isArchiveTuneExtractorEnabled) {
-            { client: PlayerStreamClient ->
-                client != PlayerStreamClient.ARCHIVETUNE_EXTRACTOR ||
-                    isArchiveTuneExtractorEnabled
-            }
-        }
-
     var showArtistSeparatorsDialog by remember { mutableStateOf(false) }
-    var showTagsManagementDialog by remember { mutableStateOf(false) }
     var showExternalDownloaderPackageDialog by remember { mutableStateOf(false) }
-
-    LaunchedEffect(playerStreamClient, isArchiveTuneExtractorEnabled) {
-        if (
-            playerStreamClient !in playerStreamClients ||
-            (
-                playerStreamClient == PlayerStreamClient.ARCHIVETUNE_EXTRACTOR &&
-                    !isArchiveTuneExtractorEnabled
-            )
-        ) {
-            onPlayerStreamClientChange(PlayerStreamClient.WEB_REMIX)
-        }
-    }
 
     if (showArtistSeparatorsDialog) {
         ArtistSeparatorsDialog(
@@ -250,19 +271,13 @@ fun PlayerSettings(navController: NavController) {
         )
     }
 
-    if (showTagsManagementDialog) {
-        TagsManagementDialog(
-            onDismiss = { showTagsManagementDialog = false },
-        )
-    }
-
     if (showExternalDownloaderPackageDialog) {
         TextFieldDialog(
             initialTextFieldValue =
                 androidx.compose.ui.text.input
                     .TextFieldValue(externalDownloaderPackage),
             onDone = { pkg ->
-                onExternalDownloaderPackageChange(pkg)
+                onExternalDownloaderPackageChange(pkg.trim())
                 showExternalDownloaderPackageDialog = false
             },
             onDismiss = { showExternalDownloaderPackageDialog = false },
@@ -270,6 +285,13 @@ fun PlayerSettings(navController: NavController) {
             maxLines = 1,
         )
     }
+
+    SponsorBlockApiUrlDialog(
+        state = sponsorBlockSettingsState,
+        onValueChange = onSponsorBlockApiUrlDraftChange,
+        onConfirm = onSponsorBlockApiUrlConfirm,
+        onDismiss = onSponsorBlockApiUrlEditorDismiss,
+    )
 
     Scaffold(
         topBar = {
@@ -305,7 +327,6 @@ fun PlayerSettings(navController: NavController) {
                         icon = { Icon(painterResource(R.drawable.graphic_eq), null) },
                         selectedValue = audioQuality,
                         onValueSelected = onAudioQualityChange,
-                        isEnabled = audioQualityEnabled,
                         valueText = {
                             when (it) {
                                 AudioQuality.HIGHEST -> stringResource(R.string.audio_quality_max)
@@ -317,76 +338,12 @@ fun PlayerSettings(navController: NavController) {
                     )
                 }
 
-                item {
-                    ListPreference(
-                        title = { Text(stringResource(R.string.player_stream_client)) },
-                        description = stringResource(R.string.player_stream_client_desc),
-                        icon = { Icon(painterResource(R.drawable.integration), null) },
-                        selectedValue = selectedPlayerStreamClient,
-                        values = playerStreamClients,
-                        onValueSelected = onPlayerStreamClientChange,
-                        isValueEnabled = isPlayerStreamClientEnabled,
-                        valueText = {
-                            when (it) {
-                                PlayerStreamClient.WEB_REMIX -> {
-                                    stringResource(R.string.player_stream_client_web_remix)
-                                }
-
-                                PlayerStreamClient.ARCHIVETUNE_EXTRACTOR -> {
-                                    stringResource(
-                                        R.string.player_stream_client_archivetune_extractor,
-                                    )
-                                }
-
-                                else -> {
-                                    stringResource(R.string.player_stream_client_web_remix)
-                                }
-                            }
-                        },
-                        valueDescription = {
-                            when (it) {
-                                PlayerStreamClient.WEB_REMIX -> {
-                                    stringResource(R.string.player_stream_client_web_remix_desc)
-                                }
-
-                                PlayerStreamClient.ARCHIVETUNE_EXTRACTOR -> {
-                                    if (isArchiveTuneExtractorEnabled) {
-                                        stringResource(
-                                            R.string.player_stream_client_archivetune_extractor_desc,
-                                        )
-                                    } else {
-                                        stringResource(
-                                            R.string.player_stream_client_archivetune_extractor_login_required,
-                                        )
-                                    }
-                                }
-
-                                else -> {
-                                    stringResource(R.string.player_stream_client_web_remix_desc)
-                                }
-                            }
-                        },
-                    )
-                }
-
-                item {
-                    PreferenceEntry(
-                        title = { Text(stringResource(R.string.mori_cipher_settings_title)) },
-                        description = stringResource(R.string.mori_cipher_settings_description),
-                        icon = { Icon(painterResource(R.drawable.security), null) },
-                        onClick = { navController.navigate("settings/player/chiper") },
-                    )
-                }
-
-                item {
-                    SwitchPreference(
-                        title = { Text(stringResource(R.string.low_data_mode_title)) },
-                        description = stringResource(R.string.low_data_mode_description),
-                        icon = { Icon(painterResource(R.drawable.android_cell), null) },
-                        checked = lowDataMode,
-                        onCheckedChange = onLowDataModeChange,
-                    )
-                }
+                playbackPerformancePreferences(
+                    state = playbackPerformanceSettingsState,
+                    onLowDataModeChange = onLowDataModeChange,
+                    onPreloadNextSongChange = onPreloadNextSongChange,
+                    onRetry = onPlaybackPerformanceRetry,
+                )
 
                 item {
                     SliderPreference(
@@ -522,6 +479,19 @@ fun PlayerSettings(navController: NavController) {
                 }
             }
 
+            PreferenceGroup(title = stringResource(R.string.sponsor_block_group)) {
+                sponsorBlockPreferences(
+                    state = sponsorBlockSettingsState,
+                    onEnabledChange = onSponsorBlockEnabledChange,
+                    onCategorySheetOpen = onSponsorBlockCategorySheetOpen,
+                    onCategorySheetDismiss = onSponsorBlockCategorySheetDismiss,
+                    onCategoryCheckedChange = onSponsorBlockCategoryCheckedChange,
+                    onCategorySelectionConfirm = onSponsorBlockCategorySelectionConfirm,
+                    onApiUrlEditorOpen = onSponsorBlockApiUrlEditorOpen,
+                    onRetry = onSponsorBlockRetry,
+                )
+            }
+
             PreferenceGroup(title = stringResource(R.string.queue)) {
                 item {
                     SwitchPreference(
@@ -594,15 +564,6 @@ fun PlayerSettings(navController: NavController) {
                 }
 
                 item {
-                    PreferenceEntry(
-                        title = { Text(stringResource(R.string.manage_playlist_tags)) },
-                        description = stringResource(R.string.manage_playlist_tags_desc),
-                        icon = { Icon(painterResource(R.drawable.style), null) },
-                        onClick = { showTagsManagementDialog = true },
-                    )
-                }
-
-                item {
                     SwitchPreference(
                         title = { Text(stringResource(R.string.external_downloader)) },
                         description = stringResource(R.string.external_downloader_desc),
@@ -622,6 +583,167 @@ fun PlayerSettings(navController: NavController) {
                     )
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun SponsorBlockApiUrlDialog(
+    state: SponsorBlockSettingsScreenState,
+    onValueChange: (String) -> Unit,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val data = (state as? SponsorBlockSettingsScreenState.Success)?.data ?: return
+    if (!data.isApiUrlEditorVisible) return
+    val isInputValid =
+        remember(data.isApiUrlDraftValid) {
+            { _: String -> data.isApiUrlDraftValid }
+        }
+    val confirmValue =
+        remember(onConfirm) {
+            { _: String -> onConfirm() }
+        }
+
+    TextFieldDialog(
+        title = { Text(stringResource(R.string.sponsor_block_api_url)) },
+        textFieldValue = data.apiUrlDraft,
+        onTextFieldValueChange = onValueChange,
+        keyboardOptions =
+            KeyboardOptions(
+                keyboardType = KeyboardType.Uri,
+                imeAction = ImeAction.Done,
+            ),
+        isInputValid = isInputValid,
+        dismissOnDone = false,
+        onDone = confirmValue,
+        onDismiss = onDismiss,
+    )
+}
+
+private fun PreferenceGroupScope.sponsorBlockPreferences(
+    state: SponsorBlockSettingsScreenState,
+    onEnabledChange: (Boolean) -> Unit,
+    onCategorySheetOpen: () -> Unit,
+    onCategorySheetDismiss: () -> Unit,
+    onCategoryCheckedChange: (SponsorBlockCategoryUiModel, Boolean) -> Unit,
+    onCategorySelectionConfirm: () -> Unit,
+    onApiUrlEditorOpen: () -> Unit,
+    onRetry: () -> Unit,
+) {
+    val data = (state as? SponsorBlockSettingsScreenState.Success)?.data
+    val controlsEnabled = data != null
+    val configurationEnabled = controlsEnabled && data?.enabled == true
+    val categoryOptions = data?.categoryOptions ?: EMPTY_SPONSOR_BLOCK_CATEGORY_OPTIONS
+    val draftCategoryOptions = data?.draftCategoryOptions ?: EMPTY_SPONSOR_BLOCK_CATEGORY_OPTIONS
+
+    item {
+        SwitchPreference(
+            title = { Text(stringResource(R.string.sponsor_block_use)) },
+            icon = { Icon(painterResource(R.drawable.block), null) },
+            checked = data?.enabled ?: false,
+            onCheckedChange = onEnabledChange,
+            isEnabled = controlsEnabled,
+        )
+    }
+
+    item {
+        val selectedCount = data?.selectedCategoryOptions?.size ?: 0
+        MultiSelectListPreference(
+            title = { Text(stringResource(R.string.sponsor_block_categories)) },
+            description = stringResource(R.string.sponsor_block_categories_desc),
+            icon = { Icon(painterResource(R.drawable.fast_forward), null) },
+            values = categoryOptions,
+            checkedValues = draftCategoryOptions,
+            selectionText =
+                androidx.compose.ui.res.pluralStringResource(
+                    R.plurals.n_selected,
+                    selectedCount,
+                    selectedCount,
+                ),
+            valueText = { option -> stringResource(option.labelRes) },
+            isBottomSheetVisible = data?.isCategorySheetVisible == true,
+            onOpen = onCategorySheetOpen,
+            onDismiss = onCategorySheetDismiss,
+            onValueCheckedChange = onCategoryCheckedChange,
+            onConfirm = onCategorySelectionConfirm,
+            isEnabled = configurationEnabled,
+        )
+    }
+
+    item {
+        PreferenceEntry(
+            title = { Text(stringResource(R.string.sponsor_block_api_url)) },
+            description = data?.apiUrl ?: DEFAULT_SPONSOR_BLOCK_API_URL,
+            icon = { Icon(painterResource(R.drawable.link), null) },
+            onClick = onApiUrlEditorOpen,
+            isEnabled = configurationEnabled,
+        )
+    }
+
+    if (state is SponsorBlockSettingsScreenState.Error) {
+        item {
+            PreferenceEntry(
+                title = { Text(stringResource(R.string.retry)) },
+                description = stringResource(state.messageRes),
+                onClick = onRetry,
+            )
+        }
+    }
+}
+
+private val EMPTY_SPONSOR_BLOCK_CATEGORY_OPTIONS: ImmutableList<SponsorBlockCategoryUiModel> =
+    ImmutableList.of()
+
+private fun PreferenceGroupScope.playbackPerformancePreferences(
+    state: PlaybackPerformanceSettingsUiState,
+    onLowDataModeChange: (Boolean) -> Unit,
+    onPreloadNextSongChange: (Boolean) -> Unit,
+    onRetry: () -> Unit,
+) {
+    val data = (state as? PlaybackPerformanceSettingsUiState.Success)?.data
+
+    val lowDataModeEnabled = data?.lowDataModeEnabled ?: false
+    val preloadNextSongEnabled = data?.preloadNextSongEnabled ?: false
+    val lowDataModeControlEnabled =
+        when (state) {
+            PlaybackPerformanceSettingsUiState.Loading,
+            is PlaybackPerformanceSettingsUiState.Error -> false
+            PlaybackPerformanceSettingsUiState.Empty,
+            is PlaybackPerformanceSettingsUiState.Success -> true
+        }
+    val preloadNextSongControlEnabled =
+        lowDataModeControlEnabled && (data?.preloadNextSongAvailable ?: true)
+
+    item {
+        SwitchPreference(
+            title = { Text(stringResource(R.string.low_data_mode_title)) },
+            description = stringResource(R.string.low_data_mode_description),
+            icon = { Icon(painterResource(R.drawable.android_cell), null) },
+            checked = lowDataModeEnabled,
+            onCheckedChange = onLowDataModeChange,
+            isEnabled = lowDataModeControlEnabled,
+        )
+    }
+
+    item {
+        SwitchPreference(
+            title = { Text(stringResource(R.string.preload_next_song_title)) },
+            description = stringResource(R.string.preload_next_song_warning),
+            icon = { Icon(painterResource(R.drawable.error), null) },
+            checked = preloadNextSongEnabled,
+            onCheckedChange = onPreloadNextSongChange,
+            isEnabled = preloadNextSongControlEnabled,
+        )
+    }
+
+    if (state is PlaybackPerformanceSettingsUiState.Error) {
+        item {
+            PreferenceEntry(
+                title = { Text(stringResource(R.string.retry)) },
+                description = stringResource(R.string.error_unknown),
+                onClick = onRetry,
+            )
         }
     }
 }

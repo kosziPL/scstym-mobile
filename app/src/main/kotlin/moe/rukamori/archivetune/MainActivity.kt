@@ -192,6 +192,7 @@ import moe.rukamori.archivetune.constants.AppLanguageKey
 import moe.rukamori.archivetune.constants.UseSystemLanguageKey
 import moe.rukamori.archivetune.constants.CustomFontUriKey
 import moe.rukamori.archivetune.constants.CustomThemeColorKey
+import moe.rukamori.archivetune.constants.WallpaperExtractionFailedKey
 import moe.rukamori.archivetune.constants.DarkModeKey
 import moe.rukamori.archivetune.constants.DefaultOpenTabKey
 import moe.rukamori.archivetune.constants.DisableAnimationsKey
@@ -200,6 +201,7 @@ import moe.rukamori.archivetune.constants.DynamicThemeKey
 import moe.rukamori.archivetune.constants.EnableHapticFeedbackKey
 import moe.rukamori.archivetune.constants.FontPreferenceKey
 import moe.rukamori.archivetune.constants.HasPressedStarKey
+import moe.rukamori.archivetune.constants.AodModeEnabledKey
 import moe.rukamori.archivetune.constants.LaunchCountKey
 import moe.rukamori.archivetune.constants.MiniPlayerBottomSpacing
 import moe.rukamori.archivetune.constants.MiniPlayerHeight
@@ -232,7 +234,9 @@ import moe.rukamori.archivetune.extensions.toMediaItem
 import moe.rukamori.archivetune.innertube.YouTube
 import moe.rukamori.archivetune.innertube.models.AlbumItem
 import moe.rukamori.archivetune.innertube.models.ArtistItem
+import moe.rukamori.archivetune.innertube.models.EpisodeItem
 import moe.rukamori.archivetune.innertube.models.PlaylistItem
+import moe.rukamori.archivetune.innertube.models.PodcastItem
 import moe.rukamori.archivetune.innertube.models.SongItem
 import moe.rukamori.archivetune.models.toMediaMetadata
 import moe.rukamori.archivetune.musicrecognition.ACTION_MUSIC_RECOGNITION
@@ -268,6 +272,7 @@ import moe.rukamori.archivetune.ui.component.shimmer.ShimmerTheme
 import moe.rukamori.archivetune.ui.menu.YouTubeSongMenu
 import moe.rukamori.archivetune.ui.player.BottomSheetPlayer
 import moe.rukamori.archivetune.ui.screens.LOGIN_URL_ARGUMENT
+import moe.rukamori.archivetune.ui.screens.LoginScreen
 import moe.rukamori.archivetune.ui.screens.Screens
 import moe.rukamori.archivetune.ui.screens.buildLoginRoute
 import moe.rukamori.archivetune.ui.screens.navigationBuilder
@@ -284,6 +289,7 @@ import moe.rukamori.archivetune.ui.theme.ArchiveTuneTheme
 import moe.rukamori.archivetune.ui.theme.ColorSaver
 import moe.rukamori.archivetune.ui.theme.DefaultThemeColor
 import moe.rukamori.archivetune.ui.theme.extractThemeColor
+import moe.rukamori.archivetune.ui.theme.extractWallpaperThemeColor
 import moe.rukamori.archivetune.ui.utils.appBarScrollBehavior
 import moe.rukamori.archivetune.ui.utils.backToMain
 import moe.rukamori.archivetune.ui.utils.resetHeightOffset
@@ -379,6 +385,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun requestAodMode() {
+        if (!dataStore.get(AodModeEnabledKey, false)) return
         pendingAodModeRequest = true
         startMusicServiceSafely()
         openPendingAodModeIfReady()
@@ -612,15 +619,16 @@ class MainActivity : ComponentActivity() {
                 ) {
                     val channelString = withContext(Dispatchers.IO) { dataStore.data.first()[UpdateChannelKey] }
                     val actualChannel = UpdateChannel.fromStoredName(channelString, defaultUpdateChannel)
-                    val versionResult =
-                        when (actualChannel) {
-                            UpdateChannel.CANARY -> Updater.getLatestCanaryVersionName()
-                            UpdateChannel.STABLE -> Updater.getLatestVersionName()
-                        }
-                    versionResult.onSuccess {
-                        if (Updater.isUpdateAvailable(it, BuildConfig.VERSION_NAME)) {
-                            latestUpdateChannel = actualChannel
-                            latestVersionName = it
+                    if (actualChannel != UpdateChannel.ARTIFACT) {
+                        val versionResult =
+                            when (actualChannel) {
+                                UpdateChannel.STABLE -> Updater.getLatestVersionName()
+                            }
+                        versionResult.onSuccess {
+                            if (Updater.isUpdateAvailable(it, BuildConfig.VERSION_NAME)) {
+                                latestUpdateChannel = actualChannel
+                                latestVersionName = it
+                            }
                         }
                     }
                 }
@@ -714,12 +722,13 @@ class MainActivity : ComponentActivity() {
                 if (
                     BuildConfig.UPDATER_AVAILABLE &&
                     latestUpdateChannel == updateChannel &&
+                    latestUpdateChannel != UpdateChannel.ARTIFACT &&
                     Updater.isUpdateAvailable(latestVersionName, BuildConfig.VERSION_NAME)
                 ) {
                     val releaseNotesResult =
                         when (latestUpdateChannel) {
-                            UpdateChannel.CANARY -> Updater.getLatestCanaryReleaseNotes()
                             UpdateChannel.STABLE -> Updater.getLatestReleaseNotes()
+                            else -> return@LaunchedEffect
                         }
                     releaseNotesResult
                         .onSuccess {
@@ -830,7 +839,11 @@ class MainActivity : ComponentActivity() {
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                             themeColor = DefaultThemeColor
                         } else {
-                            themeColor = customThemeColor
+                            val wallpaperColor = extractWallpaperThemeColor(this@MainActivity)
+                            themeColor = wallpaperColor ?: customThemeColor
+                            dataStore.edit { prefs ->
+                                prefs[WallpaperExtractionFailedKey] = wallpaperColor == null
+                            }
                         }
                     }
                 }
@@ -845,8 +858,10 @@ class MainActivity : ComponentActivity() {
                 fontPreference = fontPreference,
                 customFontUri = customFontUri,
             ) {
+                val navController = rememberNavController()
                 val onboardingViewModel: OnboardingViewModel = hiltViewModel()
                 val onboardingState by onboardingViewModel.screenState.collectAsStateWithLifecycle()
+                var showOnboardingLogin by rememberSaveable { mutableStateOf(false) }
                 val shouldShowOnboarding =
                     when (val state = onboardingState) {
                         OnboardingScreenState.Loading -> true
@@ -856,7 +871,25 @@ class MainActivity : ComponentActivity() {
                     }
 
                 if (shouldShowOnboarding) {
-                    OnboardingRoute(viewModel = onboardingViewModel)
+                    if (showOnboardingLogin) {
+                        CompositionLocalProvider(
+                            LocalPlayerAwareWindowInsets provides WindowInsets.systemBars,
+                        ) {
+                            LoginScreen(
+                                navController = navController,
+                                onLoginComplete = {
+                                    onboardingViewModel.onLoginCompleted()
+                                    showOnboardingLogin = false
+                                },
+                                onNavigateBack = { showOnboardingLogin = false },
+                            )
+                        }
+                    } else {
+                        OnboardingRoute(
+                            viewModel = onboardingViewModel,
+                            onLoginRequested = { showOnboardingLogin = true },
+                        )
+                    }
                     return@ArchiveTuneTheme
                 }
 
@@ -882,7 +915,6 @@ class MainActivity : ComponentActivity() {
                                 .windowSizeClass
                                 .isWidthAtLeastBreakpoint(WindowSizeClass.WIDTH_DP_MEDIUM_LOWER_BOUND)
 
-                    val navController = rememberNavController()
                     DisposableEffect(navController) {
                         this@MainActivity.navController = navController
                         onDispose {}
@@ -1014,11 +1046,12 @@ class MainActivity : ComponentActivity() {
                     val floatingBarsBottomPadding = NavigationBarBottomPadding
                     val navVisibleHeight = NavigationBarHeight
 
-                    val bottomNavigationBarHeight by animateDpAsState(
+                    val bottomNavigationBarHeightState = animateDpAsState(
                         targetValue = if (shouldShowNavigationBar && !useRail) navVisibleHeight else 0.dp,
                         animationSpec = if (disableAnimations) snap() else NavigationBarAnimationSpec,
                         label = "",
                     )
+                    val bottomNavigationBarHeight by bottomNavigationBarHeightState
 
                     val playerBottomSheetState =
                         rememberBottomSheetState(
@@ -1142,7 +1175,8 @@ class MainActivity : ComponentActivity() {
 
                     val shouldHideStatusBars =
                         isYearInMusicScreen ||
-                            (playerBottomSheetState.isExpandedOrExpanding && playerDesignStyle == PlayerDesignStyle.V7)
+                            (playerBottomSheetState.isExpandedOrExpanding &&
+                                playerDesignStyle == PlayerDesignStyle.V7)
 
                     LaunchedEffect(shouldHideStatusBars, aodModeEnabled) {
                         if (aodModeEnabled) return@LaunchedEffect
@@ -1848,6 +1882,7 @@ class MainActivity : ComponentActivity() {
                                                             if (
                                                                 BuildConfig.UPDATER_AVAILABLE &&
                                                                 latestUpdateChannel == updateChannel &&
+                                                                latestUpdateChannel != UpdateChannel.ARTIFACT &&
                                                                 Updater.isUpdateAvailable(latestVersionName, BuildConfig.VERSION_NAME)
                                                             ) {
                                                                 Badge()
@@ -2096,16 +2131,43 @@ class MainActivity : ComponentActivity() {
                                 },
                                 bottomBar = {
                                     Box {
-                                        val areBottomBarsPaired =
-                                            shouldShowNavigationBar &&
-                                                !useRail &&
-                                                playerBottomSheetState.isCollapsed
+                                        val showNavigationBarState = rememberUpdatedState(shouldShowNavigationBar)
+                                        val useRailState = rememberUpdatedState(useRail)
+                                        val navigationProximityProvider: () -> Float =
+                                            remember(playerBottomSheetState, bottomNavigationBarHeightState) {
+                                                {
+                                                    val navRatio =
+                                                        (bottomNavigationBarHeightState.value / navVisibleHeight).coerceIn(0f, 1f)
+                                                    val isNavTransitioning =
+                                                        bottomNavigationBarHeightState.value > 0.dp &&
+                                                            bottomNavigationBarHeightState.value < navVisibleHeight
+                                                    val morphThreshold = MiniPlayerHeight + MiniPlayerBottomSpacing
+                                                    val swipeDeviation =
+                                                        if (isNavTransitioning && playerBottomSheetState.targetAnchor == COLLAPSED_ANCHOR) {
+                                                            0.dp
+                                                        } else {
+                                                            playerBottomSheetState.value.let { v ->
+                                                                if (v < playerBottomSheetState.collapsedBound) {
+                                                                    playerBottomSheetState.collapsedBound - v
+                                                                } else {
+                                                                    v - playerBottomSheetState.collapsedBound
+                                                                }
+                                                            }
+                                                        }
+                                                    val sheetPresence = (1f - (swipeDeviation / morphThreshold)).coerceIn(0f, 1f)
+                                                    if (!showNavigationBarState.value || useRailState.value) {
+                                                        0f
+                                                    } else {
+                                                        navRatio * sheetPresence
+                                                    }
+                                                }
+                                            }
 
                                         BottomSheetPlayer(
                                             state = playerBottomSheetState,
                                             navController = navController,
                                             pureBlack = pureBlack,
-                                            isMiniPlayerPairedWithNavigation = areBottomBarsPaired,
+                                            navigationProximityProvider = navigationProximityProvider,
                                         )
 
                                         if (useRail) return@Box
@@ -2148,7 +2210,7 @@ class MainActivity : ComponentActivity() {
                                             FloatingNavigationToolbar(
                                                 items = navigationItems,
                                                 pureBlack = pureBlack,
-                                                isPairedWithMiniPlayer = areBottomBarsPaired,
+                                                miniPlayerProximityProvider = navigationProximityProvider,
                                                 modifier =
                                                     Modifier
                                                         .align(Alignment.BottomCenter)
@@ -2267,6 +2329,19 @@ class MainActivity : ComponentActivity() {
                                                                     luckyItem.playEndpoint?.let {
                                                                         playerConnection?.playQueue(YouTubeQueue.playlist(it))
                                                                     }
+                                                                }
+
+                                                                is PodcastItem -> {
+                                                                    navController.navigate("podcast/${Uri.encode(luckyItem.browseId)}")
+                                                                }
+
+                                                                is EpisodeItem -> {
+                                                                    playerConnection?.playQueue(
+                                                                        ListQueue(
+                                                                            title = luckyItem.podcast?.name ?: luckyItem.title,
+                                                                            items = listOf(luckyItem.toMediaItem()),
+                                                                        ),
+                                                                    )
                                                                 }
                                                             }
                                                         }
@@ -2400,6 +2475,7 @@ class MainActivity : ComponentActivity() {
                                     navigationBuilder(
                                         navController,
                                         topAppBarScrollBehavior,
+                                        homeViewModel,
                                         { latestVersionName },
                                         disableAnimations,
                                         onClearUpdateBadge = { latestVersionName = BuildConfig.VERSION_NAME },
@@ -2411,7 +2487,7 @@ class MainActivity : ComponentActivity() {
                             }
                         }
 
-                        BackHandler(enabled = playerBottomSheetState.isExpanded) {
+                        BackHandler(enabled = playerBottomSheetState.isExpanded && !aodModeEnabled) {
                             playerBottomSheetState.collapseSoft()
                         }
 
@@ -2750,7 +2826,7 @@ class MainActivity : ComponentActivity() {
                                     }
 
                                 endpoint?.let {
-                                    pendingDeepLinkQueue = YouTubeQueue.playlist(it)
+                                    pendingDeepLinkQueue = YouTubeQueue.playlist(it, shuffle = shouldShufflePlaylist)
                                     startMusicServiceSafely()
                                     playPendingDeepLinkQueueIfReady()
                                 } ?: navController.navigate("online_playlist/$playlistId")

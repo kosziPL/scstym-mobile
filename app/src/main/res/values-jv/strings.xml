@@ -1,4 +1,4 @@
-<?xml version='1.0' encoding='utf-8'?>
+<?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="home">Omah</string>
     <string name="songs">Lagu</string>
@@ -100,7 +100,6 @@
     <string name="search_online">Golek online</string>
     <string name="tempo_and_pitch">Tempo dan Pitch</string>
     <string name="aod_mode">Mode AOD</string>
-    <string name="aod_mode_exit">Metu dari AOD</string>
     <string name="tempo">Tempo</string>
     <string name="pitch">Pitch</string>
     <string name="pitch_mode_semitones_short">st</string>
@@ -172,10 +171,7 @@
     <plurals name="minute">
         <item quantity="other">%d menit</item>
     </plurals>
-    <string name="error_no_stream">Ora ana aliran yang tersedia</string>
     <string name="error_no_internet">Ora ana koneksi jaringan</string>
-    <string name="error_timeout">Timeout</string>
-    <string name="error_malformed_stream">Kesalahan sumber</string>
     <string name="error_unknown">Kesalahan tidak diketahui</string>
     <string name="action_like">Seneng</string>
     <string name="action_remove_like">Busak suka</string>
@@ -283,7 +279,7 @@
     <string name="brightness">Kecerahan</string>
     <string name="custom_value">Nilai khusus</string>
     <string name="archivetune_canvas">Kanvas SCSTYM</string>
-    <string name="archivetune_canvas_desc">Menganimasikan sampul album saat diputer (Didukung oleh BetterLyrics)</string>
+    <string name="archivetune_canvas_desc">Menganimasikan sampul album saat diputer</string>
     <string name="show_button1_description">Alihkan visibilitas tombol 1 di Discord Rich Presence</string>
     <string name="show_button2_description">Alihkan visibilitas tombol 2 di Discord Rich Presence</string>
     <string name="discord_activity_type">Jenis aktivitas</string>
@@ -317,10 +313,6 @@
     <string name="action_login">Mlebu</string>
     <string name="login">Mlebu</string>
     <string name="not_logged_in">Belum Mlebu</string>
-    <string name="playback_confirmation_required">Konfirmasi pemutaran diperlukan</string>
-    <string name="playback_requires_youtube_music_confirmation">Konfirmasikan pemutaran di YouTube Music, lalu kembali ke SCSTYM.</string>
-    <string name="playback_login_refresh_required">Segarkan login YouTube Music</string>
-    <string name="playback_requires_youtube_music_login_refresh">Segarkan login YouTube Music Kowe, lalu kembali ke SCSTYM.</string>
     <string name="content_language">Bahasa konten default</string>
     <string name="content_country">Negara konten default</string>
     <string name="system_default">Bawaan sistem</string>
@@ -343,12 +335,6 @@
     <string name="testing_proxy_connection">Menguji koneksi proksi…</string>
     <string name="proxy_connection_success">Koneksi proksi berhasil!</string>
     <string name="proxy_connection_failed">Koneksi proksi gagal: %s</string>
-    <string name="ip_rotation">Rotasi IP</string>
-    <string name="ip_rotation_desc">Rotasikan IP saat ini ketika terjadi masalah pemutaran atau konten.</string>
-    <string name="ip_rotation_active_proxies">%d proksi aktif</string>
-    <string name="ip_rotation_loading">Ngisi daftar proksi…</string>
-    <string name="ip_rotation_refreshing">Menyegarkan IP…</string>
-    <string name="ip_rotation_refresh">Segarkan IP</string>
     <string name="stream_bypass_proxy">Lewati proksi untuk streaming</string>
     <string name="stream_bypass_proxy_desc">Gunakan IP langsung Kowe untuk pemutaran streaming guna menghindari ketidakcocokan IP</string>
     <string name="enable_betterlyrics">Aktifkan BetterLyrics</string>
@@ -361,7 +347,7 @@
     <string name="audio_quality_high">Tinggi</string>
     <string name="audio_quality_low">Rendah</string>
     <string name="low_data_mode_title">Mode Hemat Data</string>
-    <string name="low_data_mode_description">Mengurangi penggunaan data seluler dengan menggunakan streaming berkualitas rendah dan menonaktifkan cache pemutaran, kanvas, serta pramuat lirik latar belakang pada jaringan terukur</string>
+    <string name="low_data_mode_description">Mengurangi penggunaan data seluler dengan menggunakan streaming berkualitas rendah serta menonaktifkan cache pemutaran dan kanvas pada jaringan terukur</string>
     <string name="queue">Antrean</string>
     <string name="persistent_queue">Antrean persisten</string>
     <string name="persistent_queue_desc">Pulihkan antrean terakhir Kowe saat aplikasi dimulai</string>
@@ -449,8 +435,6 @@
     <string name="disable_screenshot_desc">Jika opsi ini aktif, tangkapan layar dan tampilan aplikasi di Terbaru akan dinonaktifkan.</string>
     <string name="enable_lrclib">Aktifkan lirik LrcLib</string>
     <string name="enable_kugou">Aktifkan lirik KuGou</string>
-    <string name="preload_queue_lyrics">Pramuat lirik di antrian</string>
-    <string name="queue_lyrics_preload_count">Jumlah lagu yang akan dimuat sebelumnya</string>
     <string name="display">Tampilan</string>
     <string name="romanization">Romanisasi</string>
     <string name="hide_explicit">Delikake konten eksplisit</string>
@@ -516,14 +500,6 @@
     <string name="discord_presence_do_not_disturb">Jangan Ganggu</string>
     <string name="discord_presence_idle">Idle</string>
     <string name="discord_presence_streaming">Streaming</string>
-    <string name="discord_platform_desktop">Desktop</string>
-    <string name="discord_platform_xbox">Xbox</string>
-    <string name="discord_platform_samsung">Samsung</string>
-    <string name="discord_platform_ios">iOS</string>
-    <string name="discord_platform_android">Android</string>
-    <string name="discord_platform_embedded">Embedded</string>
-    <string name="discord_platform_ps4">PS4</string>
-    <string name="discord_platform_ps5">PS5</string>
     <string name="discord_activity_type_playing_label">Playing</string>
     <string name="discord_activity_type_streaming_label">Streaming</string>
     <string name="discord_activity_type_listening_label">Listening</string>
@@ -532,7 +508,6 @@
     <string name="discord_image_album_artwork">Sampul Album</string>
     <string name="discord_image_artist_artwork">Sampul Artis</string>
     <string name="activity_status">Status Aktivitas</string>
-    <string name="platform_status">Platform</string>
     <string name="translator_options">Opsi Penerjemah</string>
     <string name="enable_translator">Aktifkan Penerjemah</string>
     <string name="enable_translator_desc">Terjemahkan bidang yang dipilih sebelum mengirim ke Discord RPC</string>
@@ -614,7 +589,6 @@
     <string name="about">Babagan</string>
     <string name="new_version_available">Versi baru tersedia</string>
     <string name="updates">Pembaruan</string>
-    <string name="updates_subtitle_stable">Rilis stabil dan catatan rilis</string>
     <string name="current_version">Versi Saat Ini</string>
     <string name="latest_version_format">Terbaru: %s</string>
     <string name="updates_status_checking">Memeriksa rilis terbaru</string>
@@ -622,7 +596,6 @@
     <string name="enable_update_notification">Aktifkan Pemberitahuan Pembaruan</string>
     <string name="update_channel">Saluran Pembaruan</string>
     <string name="update_channel_desc">Pilih antara rilis teruji dan cuplikan pengembangan.</string>
-    <string name="channel_stable">Stabil</string>
     <string name="recent_commits">Commit Terbaru</string>
     <string name="updates_loading_commits">Ngisi commit terbaru</string>
     <string name="updates_recent_commits_count">%1$d commit terbaru</string>
@@ -702,25 +675,6 @@
     <string name="together_welcome_join_body">Buka tautan yang dibagikan, atau masukkan kode dan ketuk Gabung. Antrian dan pemutaran Kowe akan mengikuti host.</string>
     <string name="together_welcome_permissions_title">Idin dan keamanan</string>
     <string name="together_welcome_permissions_body">Tuan rumah dapat memutuskan apakah tamu dapat menambahkan lagu, mengontrol pemutaran, atau memerlukan persetujuan untuk bergabung.</string>
-    <string name="po_token_generation">Pembuatan Token PO</string>
-    <string name="web_client_po_token">Token PO Klien Web</string>
-    <string name="web_client_po_token_desc">Aktifkan pembuatan token PO untuk klien pemain berbasis web</string>
-    <string name="po_token_gvs">Token PO (GVS)</string>
-    <string name="po_token_player">Token PO (Pemutar)</string>
-    <string name="visitor_data">Data Pengunjung</string>
-    <string name="generated_tokens">Token yang Dihasilkan</string>
-    <string name="regenerate">Generate ulang</string>
-    <string name="regenerate_token">Regenerasi Token</string>
-    <string name="source_url">URL sumber</string>
-    <string name="source_url_placeholder">https://youtube.com/account</string>
-    <string name="tokens_generated">Token berhasil dibuat</string>
-    <string name="token_generation_failed">Pembuatan token gagal</string>
-    <string name="token_copied">Token disalin ke papan klip</string>
-    <string name="extracting_from_url">Mengekstrak token dari URL…</string>
-    <string name="po_token_account_notice_title">Gunakan akun yang sama</string>
-    <string name="po_token_account_notice_body">Mlebu di sini dengan akun Google yang sama yang sudah Kowe gunakan untuk YouTube Music di dalam SCSTYM sebelum membuat token PO.</string>
-    <string name="po_token_account_notice_same_account">Jika WebView ini menggunakan akun lain, token yang dihasilkan tidak akan berfungsi dengan benar.</string>
-    <string name="po_token_account_notice_mismatch">Gunakan akun yang cocok, selesaikan alur masuk, lalu buka youtube.com/account dan buat token dari halaman tersebut.</string>
     <string name="saved_accounts">Akun yang disimpan</string>
     <string name="save_current_account">Simpen akun saat ini</string>
     <string name="no_saved_accounts">Durung ana akun yang disimpan</string>

@@ -67,6 +67,7 @@ import androidx.media3.exoplayer.offline.DownloadRequest
 import androidx.media3.exoplayer.offline.DownloadService
 import androidx.navigation.NavController
 import coil3.compose.AsyncImage
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -82,9 +83,7 @@ import moe.rukamori.archivetune.constants.ListItemHeight
 import moe.rukamori.archivetune.constants.ListThumbnailSize
 import moe.rukamori.archivetune.constants.SpeedDialSongIdsKey
 import moe.rukamori.archivetune.constants.ThumbnailCornerRadius
-import moe.rukamori.archivetune.db.entities.SongEntity
 import moe.rukamori.archivetune.extensions.toMediaItem
-import moe.rukamori.archivetune.innertube.YouTube
 import moe.rukamori.archivetune.innertube.models.SongItem
 import moe.rukamori.archivetune.models.MediaMetadata
 import moe.rukamori.archivetune.models.toMediaMetadata
@@ -96,14 +95,17 @@ import moe.rukamori.archivetune.ui.component.MenuSurfaceSection
 import moe.rukamori.archivetune.ui.component.NewAction
 import moe.rukamori.archivetune.ui.component.NewActionGrid
 import moe.rukamori.archivetune.ui.utils.ShowMediaInfo
+import moe.rukamori.archivetune.utils.ExternalDownloaderLaunchResult
 import moe.rukamori.archivetune.utils.SpeedDialPin
 import moe.rukamori.archivetune.utils.SpeedDialPinType
 import moe.rukamori.archivetune.utils.joinByBullet
 import moe.rukamori.archivetune.utils.makeTimeString
+import moe.rukamori.archivetune.utils.openExternalDownloader
 import moe.rukamori.archivetune.utils.parseSpeedDialPins
 import moe.rukamori.archivetune.utils.rememberPreference
 import moe.rukamori.archivetune.utils.serializeSpeedDialPins
 import moe.rukamori.archivetune.utils.toggleSpeedDialPin
+import timber.log.Timber
 import java.time.LocalDateTime
 
 @SuppressLint("MutableCollectionMutableState")
@@ -280,17 +282,32 @@ fun YouTubeSongMenu(
             trailingContent = {
                 IconButton(
                     onClick = {
-                        database.transaction {
-                            librarySong.let { librarySong ->
-                                val updatedSong: SongEntity
-                                if (librarySong == null) {
-                                    insert(song.toMediaMetadata(), SongEntity::toggleLike)
-                                    updatedSong = song.toMediaMetadata().toSongEntity().let(SongEntity::toggleLike)
-                                } else {
-                                    updatedSong = librarySong.song.toggleLike()
-                                    update(updatedSong)
+                        coroutineScope.launch(Dispatchers.IO) {
+                            try {
+                                val requestedSong =
+                                    database.withTransaction {
+                                        val currentSong =
+                                            getSongById(song.id)
+                                                ?: run {
+                                                    insert(song.toMediaMetadata())
+                                                    getSongById(song.id)
+                                                }
+                                                ?: return@withTransaction null
+                                        currentSong.song.toggleLike()
+                                    } ?: return@launch
+                                syncUtils.likeSong(requestedSong).onFailure { error ->
+                                    Timber.w(error, "Failed to update liked song ${song.id}")
+                                    withContext(Dispatchers.Main) {
+                                        Toast.makeText(context, R.string.error_unknown, Toast.LENGTH_SHORT).show()
+                                    }
                                 }
-                                syncUtils.likeSong(updatedSong)
+                            } catch (error: CancellationException) {
+                                throw error
+                            } catch (error: Exception) {
+                                Timber.e(error, "Failed to prepare liked song ${song.id}")
+                                withContext(Dispatchers.Main) {
+                                    Toast.makeText(context, R.string.error_unknown, Toast.LENGTH_SHORT).show()
+                                }
                             }
                         }
                     },
@@ -480,30 +497,35 @@ fun YouTubeSongMenu(
                     modifier =
                         Modifier.clickable {
                             coroutineScope.launch(Dispatchers.IO) {
-                                val shouldAdd = librarySong?.song?.inLibrary == null
-                                val remoteResult = YouTube.likeVideo(song.id, shouldAdd)
-                                if (remoteResult.isFailure) {
+                                try {
+                                    val requestedSong =
+                                        database.withTransaction {
+                                            val currentSong =
+                                                getSongById(song.id)?.song
+                                                    ?: song.toMediaMetadata().toSongEntity().also {
+                                                        insert(song.toMediaMetadata())
+                                                    }
+                                            val shouldAdd = currentSong.inLibrary == null
+                                            val now = LocalDateTime.now()
+                                            currentSong.copy(
+                                                liked = shouldAdd,
+                                                likedDate = if (shouldAdd) now else null,
+                                                inLibrary = if (shouldAdd) now else null,
+                                            )
+                                        }
+                                    syncUtils.likeSong(requestedSong).onFailure { error ->
+                                        Timber.w(error, "Failed to update song library state ${song.id}")
+                                        withContext(Dispatchers.Main) {
+                                            Toast.makeText(context, R.string.error_unknown, Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                                } catch (error: CancellationException) {
+                                    throw error
+                                } catch (error: Exception) {
+                                    Timber.e(error, "Failed to prepare song library state ${song.id}")
                                     withContext(Dispatchers.Main) {
-                                        Toast
-                                            .makeText(context, context.getString(R.string.error_unknown), Toast.LENGTH_SHORT)
-                                            .show()
+                                        Toast.makeText(context, R.string.error_unknown, Toast.LENGTH_SHORT).show()
                                     }
-                                    return@launch
-                                }
-
-                                val now = LocalDateTime.now()
-                                database.withTransaction {
-                                    val base = librarySong?.song ?: song.toMediaMetadata().toSongEntity()
-                                    if (librarySong == null) {
-                                        insert(song.toMediaMetadata())
-                                    }
-                                    update(
-                                        base.copy(
-                                            liked = shouldAdd,
-                                            likedDate = if (shouldAdd) now else null,
-                                            inLibrary = if (shouldAdd) now else null,
-                                        ),
-                                    )
                                 }
                             }
                         },
@@ -665,30 +687,24 @@ fun YouTubeSongMenu(
                                 Modifier.clickable {
                                     onDismiss()
                                     val url = "https://music.youtube.com/watch?v=${song.id}"
-                                    if (externalDownloaderPackage.isBlank()) {
-                                        Toast
-                                            .makeText(
-                                                context,
-                                                context.getString(R.string.external_downloader_not_configured),
-                                                Toast.LENGTH_LONG,
-                                            ).show()
-                                        return@clickable
-                                    }
-                                    val intent =
-                                        Intent(Intent.ACTION_VIEW).apply {
-                                            setPackage(externalDownloaderPackage)
-                                            data = android.net.Uri.parse(url)
-                                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    when (context.openExternalDownloader(externalDownloaderPackage, url)) {
+                                        ExternalDownloaderLaunchResult.STARTED -> Unit
+                                        ExternalDownloaderLaunchResult.NOT_CONFIGURED -> {
+                                            Toast
+                                                .makeText(
+                                                    context,
+                                                    context.getString(R.string.external_downloader_not_configured),
+                                                    Toast.LENGTH_LONG,
+                                                ).show()
                                         }
-                                    try {
-                                        context.startActivity(intent)
-                                    } catch (e: android.content.ActivityNotFoundException) {
-                                        Toast
-                                            .makeText(
-                                                context,
-                                                context.getString(R.string.external_downloader_not_installed),
-                                                Toast.LENGTH_SHORT,
-                                            ).show()
+                                        ExternalDownloaderLaunchResult.NOT_INSTALLED -> {
+                                            Toast
+                                                .makeText(
+                                                    context,
+                                                    context.getString(R.string.external_downloader_not_installed),
+                                                    Toast.LENGTH_SHORT,
+                                                ).show()
+                                        }
                                     }
                                 },
                             colors = ListItemDefaults.colors(containerColor = Color.Transparent),

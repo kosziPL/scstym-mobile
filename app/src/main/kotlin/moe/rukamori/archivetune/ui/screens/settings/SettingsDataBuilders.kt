@@ -64,6 +64,15 @@ fun buildSettingsGroups(
             accentColor = MaterialTheme.colorScheme.tertiary,
             onClick = { navController.navigate("settings/player") },
         )
+    val canvas =
+        SettingsItem(
+            key = "canvas",
+            icon = painterResource(R.drawable.motion_photos_on),
+            title = stringResource(R.string.archivetune_canvas),
+            subtitle = stringResource(R.string.canvas_settings_subtitle),
+            accentColor = MaterialTheme.colorScheme.tertiary,
+            onClick = { navController.navigate("settings/canvas") },
+        )
     val lyrics =
         SettingsItem(
             key = "lyrics",
@@ -117,15 +126,6 @@ fun buildSettingsGroups(
             subtitle = stringResource(R.string.settings_internet_subtitle),
             accentColor = MaterialTheme.colorScheme.tertiary,
             onClick = { navController.navigate("settings/internet") },
-        )
-    val poToken =
-        SettingsItem(
-            key = "po_token",
-            icon = painterResource(R.drawable.token),
-            title = stringResource(R.string.po_token_generation),
-            subtitle = stringResource(R.string.settings_po_token_subtitle),
-            accentColor = MaterialTheme.colorScheme.secondary,
-            onClick = { navController.navigate(PO_TOKEN_ROUTE) },
         )
     val storage =
         SettingsItem(
@@ -242,11 +242,11 @@ fun buildSettingsGroups(
         ),
         SettingsGroup(
             title = stringResource(R.string.settings_section_player_content),
-            items = listOf(appearance, playback, lyrics, content, behavior),
+            items = listOf(appearance, playback, canvas, lyrics, content, behavior),
         ),
         SettingsGroup(
             title = stringResource(R.string.integration),
-            items = listOf(integration, aiIntegration, internet, poToken),
+            items = listOf(integration, aiIntegration, internet),
         ),
         SettingsGroup(
             title = stringResource(R.string.storage),

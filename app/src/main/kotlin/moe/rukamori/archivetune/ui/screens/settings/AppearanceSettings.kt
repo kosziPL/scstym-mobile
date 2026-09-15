@@ -64,11 +64,12 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavController
 import moe.rukamori.archivetune.LocalPlayerAwareWindowInsets
 import moe.rukamori.archivetune.R
 import moe.rukamori.archivetune.constants.AppFontPreference
-import moe.rukamori.archivetune.constants.ArchiveTuneCanvasKey
 import moe.rukamori.archivetune.constants.BackdropBlurAmountKey
 import moe.rukamori.archivetune.constants.BackdropEnabledKey
 import moe.rukamori.archivetune.constants.BlurRadiusKey
@@ -77,6 +78,8 @@ import moe.rukamori.archivetune.constants.CropThumbnailToSquareKey
 import moe.rukamori.archivetune.constants.CustomFontNameKey
 import moe.rukamori.archivetune.constants.CustomFontUriKey
 import moe.rukamori.archivetune.constants.DarkModeKey
+import moe.rukamori.archivetune.constants.DefaultLibraryFilterOrder
+import moe.rukamori.archivetune.constants.DefaultLibraryFilterOrderPreference
 import moe.rukamori.archivetune.constants.DefaultOpenTabKey
 import moe.rukamori.archivetune.constants.DisableAnimationsKey
 import moe.rukamori.archivetune.constants.DisableBlurKey
@@ -86,6 +89,7 @@ import moe.rukamori.archivetune.constants.ForceHighRefreshRateKey
 import moe.rukamori.archivetune.constants.GridItemSize
 import moe.rukamori.archivetune.constants.GridItemsSizeKey
 import moe.rukamori.archivetune.constants.HidePlayerThumbnailKey
+import moe.rukamori.archivetune.constants.LibraryChipOrderKey
 import moe.rukamori.archivetune.constants.LibraryFilter
 import moe.rukamori.archivetune.constants.LyricsBackgroundStyle
 import moe.rukamori.archivetune.constants.LyricsBackgroundStyleKey
@@ -97,6 +101,7 @@ import moe.rukamori.archivetune.constants.PlayerButtonsStyle
 import moe.rukamori.archivetune.constants.PlayerButtonsStyleKey
 import moe.rukamori.archivetune.constants.PlayerDesignStyle
 import moe.rukamori.archivetune.constants.PlayerDesignStyleKey
+import moe.rukamori.archivetune.constants.PlaylistTagOrderKey
 import moe.rukamori.archivetune.constants.PureBlackKey
 import moe.rukamori.archivetune.constants.QuickPicksDisplayMode
 import moe.rukamori.archivetune.constants.QuickPicksDisplayModeKey
@@ -110,13 +115,21 @@ import moe.rukamori.archivetune.constants.SwipeSensitivityKey
 import moe.rukamori.archivetune.constants.SwipeThumbnailKey
 import moe.rukamori.archivetune.constants.SwipeToSongKey
 import moe.rukamori.archivetune.constants.ThumbnailCornerRadiusKey
+import moe.rukamori.archivetune.constants.WallpaperExtractionFailedKey
+import moe.rukamori.archivetune.constants.toLibraryFilterOrder
+import moe.rukamori.archivetune.constants.toLibraryFilterPreference
+import moe.rukamori.archivetune.constants.toPlaylistTagOrder
+import moe.rukamori.archivetune.constants.toPlaylistTagPreference
 import moe.rukamori.archivetune.ui.component.DefaultDialog
 import moe.rukamori.archivetune.ui.component.EnumListPreference
 import moe.rukamori.archivetune.ui.component.IconButton
+import moe.rukamori.archivetune.ui.component.LibraryChipOrderDialog
 import moe.rukamori.archivetune.ui.component.ListPreference
+import moe.rukamori.archivetune.ui.component.PlaylistTagOrderDialog
 import moe.rukamori.archivetune.ui.component.PreferenceEntry
 import moe.rukamori.archivetune.ui.component.PreferenceGroup
 import moe.rukamori.archivetune.ui.component.SwitchPreference
+import moe.rukamori.archivetune.ui.component.TagsManagementDialog
 import moe.rukamori.archivetune.ui.component.ThumbnailCornerRadiusSelectorButton
 import moe.rukamori.archivetune.ui.player.StyledPlaybackSlider
 import moe.rukamori.archivetune.ui.theme.CustomFontLoader
@@ -124,17 +137,27 @@ import moe.rukamori.archivetune.ui.utils.backToMain
 import moe.rukamori.archivetune.utils.isLowRamDevice
 import moe.rukamori.archivetune.utils.rememberEnumPreference
 import moe.rukamori.archivetune.utils.rememberPreference
+import moe.rukamori.archivetune.viewmodels.PlaylistTagUiModel
+import moe.rukamori.archivetune.viewmodels.PlaylistTagsScreenState
+import moe.rukamori.archivetune.viewmodels.PlaylistTagsViewModel
 import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AppearanceSettings(navController: NavController) {
+    val playlistTagsViewModel: PlaylistTagsViewModel = hiltViewModel()
+    val playlistTagsState by playlistTagsViewModel.screenState.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val defaultDisableAnimations = remember(context) { context.isLowRamDevice() }
     val (dynamicTheme, onDynamicThemeChange) =
         rememberPreference(
             DynamicThemeKey,
             defaultValue = true,
+        )
+    val (wallpaperExtractionFailed) =
+        rememberPreference(
+            WallpaperExtractionFailedKey,
+            defaultValue = false,
         )
     val (randomThemeOnStartup, onRandomThemeOnStartupChange) =
         rememberPreference(
@@ -159,11 +182,6 @@ fun AppearanceSettings(navController: NavController) {
     val (hidePlayerThumbnail, onHidePlayerThumbnailChange) =
         rememberPreference(
             HidePlayerThumbnailKey,
-            defaultValue = false,
-        )
-    val (archiveTuneCanvasEnabled, onArchiveTuneCanvasEnabledChange) =
-        rememberPreference(
-            ArchiveTuneCanvasKey,
             defaultValue = false,
         )
     val (thumbnailCornerRadius, onThumbnailCornerRadiusChange) =
@@ -260,6 +278,29 @@ fun AppearanceSettings(navController: NavController) {
             ShowHomeCategoryChipsKey,
             defaultValue = true,
         )
+    val (libraryChipOrderPreference, onLibraryChipOrderChange) =
+        rememberPreference(
+            LibraryChipOrderKey,
+            defaultValue = DefaultLibraryFilterOrderPreference,
+        )
+    val libraryChipOrder =
+        remember(libraryChipOrderPreference) {
+            libraryChipOrderPreference.toLibraryFilterOrder()
+        }
+    val (playlistTagOrderPreference, onPlaylistTagOrderChange) =
+        rememberPreference(
+            PlaylistTagOrderKey,
+            defaultValue = "",
+        )
+    val availablePlaylistTags =
+        (playlistTagsState as? PlaylistTagsScreenState.Success)?.tags.orEmpty()
+    val playlistTagOrder =
+        remember(availablePlaylistTags, playlistTagOrderPreference) {
+            val tagsById = availablePlaylistTags.associateBy(PlaylistTagUiModel::id)
+            playlistTagOrderPreference
+                .toPlaylistTagOrder(availablePlaylistTags.map(PlaylistTagUiModel::id))
+                .mapNotNull { tagId -> tagsById[tagId] }
+        }
     val (quickPicksDisplayMode, onQuickPicksDisplayModeChange) =
         rememberEnumPreference(
             QuickPicksDisplayModeKey,
@@ -327,6 +368,7 @@ fun AppearanceSettings(navController: NavController) {
             PlayerDesignStyle.V7,
             PlayerDesignStyle.V8,
             PlayerDesignStyle.V9,
+            PlayerDesignStyle.V10,
             -> false
 
             else -> true
@@ -354,6 +396,15 @@ fun AppearanceSettings(navController: NavController) {
     )
 
     var showSliderOptionDialog by rememberSaveable {
+        mutableStateOf(false)
+    }
+    var showLibraryChipOrderDialog by rememberSaveable {
+        mutableStateOf(false)
+    }
+    var showPlaylistTagOrderDialog by rememberSaveable {
+        mutableStateOf(false)
+    }
+    var showTagsManagementDialog by rememberSaveable {
         mutableStateOf(false)
     }
 
@@ -421,6 +472,37 @@ fun AppearanceSettings(navController: NavController) {
         }
     }
 
+    if (showLibraryChipOrderDialog) {
+        LibraryChipOrderDialog(
+            initialOrder = libraryChipOrder,
+            onDismiss = { showLibraryChipOrderDialog = false },
+            onConfirm = { newOrder ->
+                onLibraryChipOrderChange(newOrder.toLibraryFilterPreference())
+                showLibraryChipOrderDialog = false
+            },
+        )
+    }
+
+    if (showPlaylistTagOrderDialog) {
+        PlaylistTagOrderDialog(
+            state = playlistTagsState,
+            initialOrder = playlistTagOrder,
+            onDismiss = { showPlaylistTagOrderDialog = false },
+            onConfirm = { newOrder ->
+                onPlaylistTagOrderChange(
+                    newOrder.map(PlaylistTagUiModel::id).toPlaylistTagPreference(),
+                )
+                showPlaylistTagOrderDialog = false
+            },
+        )
+    }
+
+    if (showTagsManagementDialog) {
+        TagsManagementDialog(
+            onDismiss = { showTagsManagementDialog = false },
+        )
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -458,7 +540,23 @@ fun AppearanceSettings(navController: NavController) {
                     )
                 }
 
-                item(visible = !dynamicTheme || Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+                item(visible = dynamicTheme && Build.VERSION.SDK_INT < Build.VERSION_CODES.S && wallpaperExtractionFailed) {
+                    PreferenceEntry(
+                        title = { Text(stringResource(R.string.wallpaper_permission)) },
+                        description = stringResource(R.string.wallpaper_permission_desc),
+                        icon = { Icon(painterResource(R.drawable.storage), null) },
+                        onClick = {
+                            val intent =
+                                android.content.Intent(
+                                    android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                    android.net.Uri.fromParts("package", context.packageName, null),
+                                )
+                            context.startActivity(intent)
+                        },
+                    )
+                }
+
+                item(visible = !dynamicTheme) {
                     SwitchPreference(
                         title = { Text(stringResource(R.string.random_theme_on_startup)) },
                         description = stringResource(R.string.random_theme_on_startup_desc),
@@ -649,6 +747,7 @@ fun AppearanceSettings(navController: NavController) {
                                 PlayerDesignStyle.V7 -> stringResource(R.string.player_design_v7)
                                 PlayerDesignStyle.V8 -> stringResource(R.string.player_design_v8)
                                 PlayerDesignStyle.V9 -> stringResource(R.string.player_design_v9)
+                                PlayerDesignStyle.V10 -> stringResource(R.string.player_design_v10)
                             }
                         },
                     )
@@ -759,16 +858,6 @@ fun AppearanceSettings(navController: NavController) {
                         icon = { Icon(painterResource(R.drawable.hide_image), null) },
                         checked = hidePlayerThumbnail,
                         onCheckedChange = onHidePlayerThumbnailChange,
-                    )
-                }
-
-                item {
-                    SwitchPreference(
-                        title = { Text(stringResource(R.string.archivetune_canvas)) },
-                        description = stringResource(R.string.archivetune_canvas_desc),
-                        icon = { Icon(painterResource(R.drawable.motion_photos_on), null) },
-                        checked = archiveTuneCanvasEnabled,
-                        onCheckedChange = onArchiveTuneCanvasEnabledChange,
                     )
                 }
 
@@ -955,14 +1044,7 @@ fun AppearanceSettings(navController: NavController) {
                         title = { Text(stringResource(R.string.default_lib_chips)) },
                         icon = { Icon(painterResource(R.drawable.tab), null) },
                         selectedValue = defaultChip,
-                        values =
-                            listOf(
-                                LibraryFilter.LIBRARY,
-                                LibraryFilter.PLAYLISTS,
-                                LibraryFilter.SONGS,
-                                LibraryFilter.ALBUMS,
-                                LibraryFilter.ARTISTS,
-                            ),
+                        values = DefaultLibraryFilterOrder,
                         valueText = {
                             when (it) {
                                 LibraryFilter.SONGS -> stringResource(R.string.songs)
@@ -974,6 +1056,33 @@ fun AppearanceSettings(navController: NavController) {
                             }
                         },
                         onValueSelected = onDefaultChipChange,
+                    )
+                }
+
+                item {
+                    PreferenceEntry(
+                        title = { Text(stringResource(R.string.arrange_library_chips)) },
+                        description = stringResource(R.string.arrange_library_chips_desc),
+                        icon = { Icon(painterResource(R.drawable.tab), null) },
+                        onClick = { showLibraryChipOrderDialog = true },
+                    )
+                }
+
+                item {
+                    PreferenceEntry(
+                        title = { Text(stringResource(R.string.arrange_playlist_tags)) },
+                        description = stringResource(R.string.arrange_playlist_tags_desc),
+                        icon = { Icon(painterResource(R.drawable.style), null) },
+                        onClick = { showPlaylistTagOrderDialog = true },
+                    )
+                }
+
+                item {
+                    PreferenceEntry(
+                        title = { Text(stringResource(R.string.manage_playlist_tags)) },
+                        description = stringResource(R.string.manage_playlist_tags_desc),
+                        icon = { Icon(painterResource(R.drawable.style), null) },
+                        onClick = { showTagsManagementDialog = true },
                     )
                 }
 
