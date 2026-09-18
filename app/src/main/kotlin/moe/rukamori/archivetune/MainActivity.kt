@@ -466,8 +466,9 @@ class MainActivity : ComponentActivity() {
     private fun releasePlayerConnection() {
         pendingAodModeJob?.cancel()
         pendingAodModeJob = null
-        playerConnection?.dispose()
+        val connection = playerConnection
         playerConnection = null
+        connection?.beginDisposal()
     }
 
     private fun safeUnbindMusicService() {
@@ -2558,6 +2559,13 @@ class MainActivity : ComponentActivity() {
                                         end = 16.dp,
                                     ).zIndex(10f),
                         )
+                    }
+
+                    val connectionAwaitingUiDisposal = playerConnection
+                    DisposableEffect(connectionAwaitingUiDisposal) {
+                        onDispose {
+                            connectionAwaitingUiDisposal?.releaseReferencesAfterUiDisposal()
+                        }
                     }
 
                     pendingBackupRestoreUri?.let { uri ->

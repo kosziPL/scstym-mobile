@@ -62,6 +62,7 @@ class PlayerConnection(
     private val connectionScope = CoroutineScope(scope.coroutineContext + connectionJob)
     private val applicationContext = context.applicationContext
     private var disposed = false
+    private var referencesReleased = false
     // Compose/content capture may retain old callbacks after unbinding. A disposed
     // connection must release the entire playback graph, not just its listeners.
     private var connectedService: MusicService? = service
@@ -437,15 +438,36 @@ class PlayerConnection(
         }
     }
 
-    fun dispose() {
+    /**
+     * Stops this connection while its Compose consumers are being removed.
+     *
+     * Compose cancels [LaunchedEffect]s during the recomposition caused by removing the
+     * connection from [moe.rukamori.archivetune.LocalPlayerConnection]. Clearing the player
+     * references before that happens leaves those effects with a disposed connection and can
+     * crash the activity. Call [releaseReferencesAfterUiDisposal] from the matching
+     * [androidx.compose.runtime.DisposableEffect].
+     */
+    fun beginDisposal() {
         if (disposed) return
         disposed = true
         connectionJob.cancel()
-        player.removeListener(this)
+        connectedPlayer?.removeListener(this)
         metadataExtractionJob?.cancel()
         metadataExtractionJob = null
+    }
+
+    /** Releases the service graph after every Compose consumer of this connection has left. */
+    fun releaseReferencesAfterUiDisposal() {
+        if (referencesReleased) return
+        referencesReleased = true
         connectedPlayer = null
         connectedLocalPlayer = null
         connectedService = null
+    }
+
+    /** Immediately stops the connection and releases its references for non-Compose owners. */
+    fun dispose() {
+        beginDisposal()
+        releaseReferencesAfterUiDisposal()
     }
 }

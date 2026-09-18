@@ -16,6 +16,7 @@ import android.service.dreams.DreamService
 import androidx.activity.OnBackPressedDispatcher
 import androidx.activity.OnBackPressedDispatcherOwner
 import androidx.activity.setViewTreeOnBackPressedDispatcherOwner
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
@@ -72,17 +73,23 @@ class AodDreamService :
     override val onBackPressedDispatcher: OnBackPressedDispatcher get() = backPressedDispatcher
 
     private var playerConnection by mutableStateOf<PlayerConnection?>(null)
+
+    private fun releasePlayerConnection() {
+        val connection = playerConnection
+        playerConnection = null
+        connection?.beginDisposal()
+    }
+
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
             if (lifecycle.currentState == Lifecycle.State.DESTROYED) return
             val musicService = (binder as? MusicService.MusicBinder)?.service ?: return
-            playerConnection?.dispose()
+            releasePlayerConnection()
             playerConnection = PlayerConnection(this@AodDreamService, musicService, database, serviceScope)
         }
 
         override fun onServiceDisconnected(name: ComponentName?) {
-            playerConnection?.dispose()
-            playerConnection = null
+            releasePlayerConnection()
         }
     }
 
@@ -175,6 +182,11 @@ class AodDreamService :
                         onExit = { finish() },
                         lyricsText = currentLyricsEntity?.lyrics,
                     )
+                    DisposableEffect(conn) {
+                        onDispose {
+                            conn?.releaseReferencesAfterUiDisposal()
+                        }
+                    }
                 }
             }
         }
@@ -190,8 +202,7 @@ class AodDreamService :
 
     override fun onDestroy() {
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_DESTROY)
-        playerConnection?.dispose()
-        playerConnection = null
+        releasePlayerConnection()
         serviceScope.cancel()
         runCatching { unbindService(serviceConnection) }
         super.onDestroy()
