@@ -8,6 +8,7 @@ android {
 
     defaultConfig {
         minSdk = 26
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     compileOptions {
@@ -22,6 +23,8 @@ kotlin {
 
 dependencies {
     testImplementation(libs.junit)
+    androidTestImplementation(libs.junit)
+    androidTestImplementation("androidx.test:runner:1.7.0")
     implementation(libs.coroutines.core)
     implementation(libs.okhttp)
     implementation(libs.quickjs.kt)

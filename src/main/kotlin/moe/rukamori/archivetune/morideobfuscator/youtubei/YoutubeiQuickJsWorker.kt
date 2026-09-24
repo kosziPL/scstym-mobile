@@ -37,7 +37,7 @@ internal class YoutubeiQuickJsWorker(
     private val dispatcher =
         Executors
             .newSingleThreadExecutor { runnable ->
-                Thread(runnable, "ArchiveTune-Youtubei-$name").apply { isDaemon = true }
+                YoutubeiRuntimeStack.newThread(runnable, "ArchiveTune-Youtubei-$name")
             }.asCoroutineDispatcher()
     private val mutex = Mutex()
     private val secureRandom = SecureRandom()
@@ -130,7 +130,7 @@ internal class YoutubeiQuickJsWorker(
         val runtime = QuickJs.create(dispatcher)
         try {
             runtime.memoryLimit = JAVASCRIPT_MEMORY_LIMIT_BYTES
-            runtime.maxStackSize = JAVASCRIPT_STACK_LIMIT_BYTES
+            runtime.maxStackSize = YoutubeiRuntimeStack.JAVASCRIPT_LIMIT_BYTES
             runtime.evaluationTimeoutMillis = JAVASCRIPT_TIMEOUT_MS
             runtime.asyncFunction<String, String>("__archiveTuneHttp") { request ->
                 httpClient.execute(request, activeRequestAuthentication)
@@ -231,7 +231,6 @@ internal class YoutubeiQuickJsWorker(
         const val RUNTIME_POLYFILLS_ASSET = "youtubei/runtime-polyfills.js"
         const val JAVASCRIPT_TIMEOUT_MS = 30_000L
         const val JAVASCRIPT_MEMORY_LIMIT_BYTES = 256L * 1024L * 1024L
-        const val JAVASCRIPT_STACK_LIMIT_BYTES = 2L * 1024L * 1024L
         const val MAX_RANDOM_BYTES = 4096
     }
 }
