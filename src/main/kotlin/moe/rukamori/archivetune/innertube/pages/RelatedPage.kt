@@ -17,6 +17,8 @@ import moe.rukamori.archivetune.innertube.models.PlaylistItem
 import moe.rukamori.archivetune.innertube.models.SongItem
 import moe.rukamori.archivetune.innertube.models.YTItem
 import moe.rukamori.archivetune.innertube.models.oddElements
+import moe.rukamori.archivetune.innertube.models.splitBySeparator
+import moe.rukamori.archivetune.innertube.models.toArtists
 
 data class RelatedPage(
     val songs: List<SongItem>,
@@ -27,6 +29,12 @@ data class RelatedPage(
     companion object {
         fun fromMusicResponsiveListItemRenderer(renderer: MusicResponsiveListItemRenderer): SongItem? {
             val thumbnail = renderer.thumbnail?.musicThumbnailRenderer?.getBestThumbnail() ?: return null
+            // Recommendation cards may put a localized media type before the artists.
+            // Identify the artist group by its links, not by a fixed column position.
+            val metadata = renderer.flexColumns.drop(1).flatMap {
+                it.musicResponsiveListItemFlexColumnRenderer.text?.runs?.splitBySeparator().orEmpty()
+            }
+            val artistRuns = metadata.firstOrNull { it.toArtists().isNotEmpty() }.orEmpty()
             return SongItem(
                 id = renderer.playlistItemData?.videoId ?: return null,
                 title =
@@ -38,14 +46,17 @@ data class RelatedPage(
                         ?.firstOrNull()
                         ?.text ?: return null,
                 artists =
-                    renderer.flexColumns.getOrNull(1)?.musicResponsiveListItemFlexColumnRenderer?.text?.runs?.oddElements()?.map {
+                    artistRuns.oddElements().filter { it.text.isNotBlank() }.map {
                         Artist(
                             name = it.text,
                             id = it.navigationEndpoint?.browseEndpoint?.browseId,
                         )
-                    } ?: return null,
+                    },
                 album =
-                    renderer.flexColumns.getOrNull(2)?.musicResponsiveListItemFlexColumnRenderer?.text?.runs?.firstOrNull()?.let {
+                    metadata.flatten().firstOrNull {
+                        val endpoint = it.navigationEndpoint?.browseEndpoint
+                        endpoint?.isAlbumEndpoint == true || endpoint?.browseId?.startsWith("MPREb_") == true
+                    }?.let {
                         Album(
                             name = it.text,
                             id = it.navigationEndpoint?.browseEndpoint?.browseId ?: return null,

@@ -22,6 +22,8 @@ import moe.rukamori.archivetune.innertube.models.SongItem
 import moe.rukamori.archivetune.innertube.models.YTItem
 import moe.rukamori.archivetune.innertube.models.getItems
 import moe.rukamori.archivetune.innertube.models.oddElements
+import moe.rukamori.archivetune.innertube.models.splitBySeparator
+import moe.rukamori.archivetune.innertube.models.toArtists
 
 enum class ArtistSectionLayout {
     LIST,
@@ -176,14 +178,12 @@ data class ArtistPage(
                                 ?.firstOrNull()
                                 ?.text ?: return null,
                         artists =
-                            listOfNotNull(
-                                renderer.subtitle?.runs?.firstOrNull()?.let {
-                                    Artist(
-                                        name = it.text,
-                                        id = it.navigationEndpoint?.browseEndpoint?.browseId,
-                                    )
-                                },
-                            ),
+                            renderer.subtitle?.runs?.splitBySeparator()
+                                ?.firstOrNull { it.toArtists().isNotEmpty() }
+                                ?.oddElements()
+                                ?.filter { it.text.isNotBlank() }
+                                ?.map { Artist(name = it.text, id = it.navigationEndpoint?.browseEndpoint?.browseId) }
+                                .orEmpty(),
                         album = null,
                         duration = null,
                         thumbnail = thumbnail.normalizedUrl,

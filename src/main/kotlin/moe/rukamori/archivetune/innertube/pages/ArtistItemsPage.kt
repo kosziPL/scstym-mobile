@@ -17,6 +17,7 @@ import moe.rukamori.archivetune.innertube.models.SongItem
 import moe.rukamori.archivetune.innertube.models.YTItem
 import moe.rukamori.archivetune.innertube.models.oddElements
 import moe.rukamori.archivetune.innertube.models.splitBySeparator
+import moe.rukamori.archivetune.innertube.models.toArtists
 import moe.rukamori.archivetune.innertube.utils.parseTime
 
 enum class ArtistItemsPageLayout {
@@ -129,7 +130,7 @@ data class ArtistItemsPage(
                                 ?.firstOrNull()
                                 ?.text ?: return null,
                         artists =
-                            renderer.subtitle?.runs?.splitBySeparator()?.firstOrNull()?.oddElements()?.map {
+                            renderer.subtitle?.runs?.splitBySeparator()?.firstOrNull { it.toArtists().isNotEmpty() }?.oddElements()?.map {
                                 Artist(
                                     name = it.text,
                                     id = it.navigationEndpoint?.browseEndpoint?.browseId,
